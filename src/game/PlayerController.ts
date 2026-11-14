@@ -370,12 +370,14 @@ export class PlayerController {
     const forward = new THREE.Vector3(Math.sin(this.aimYaw), 0, Math.cos(this.aimYaw));
 
     if (this.def.id === 'knight') {
-      // Aegis Judgment: Heal +25, 2s i-frames, 5m consecrated lightning smite
+      // Aegis Judgment: Heal +25, 2s i-frames, 5m consecrated pillar + lightning smite
       this.anim.playOneShot('Melee_1H_Attack_Jump_Chop', 0.05, 1.15, 0.45);
       this.heal(25);
       this.iFrames = Math.max(this.iFrames, 2.0);
       this.sound.playExplosion();
+      this.vfx.spawnConsecratedPillar(this.pos, 0xfacc15, 2.8, 7.5);
       this.vfx.spawnRing(this.pos, 5.2, 0xfacc15, 0.55);
+      this.vfx.spawnBurst(this.pos.clone().add(new THREE.Vector3(0, 1.0, 0)), 0xfde047, 24, 6.5);
       this.vfx.addCameraShake(forward, 0.35);
       this.vfx.triggerHitStop(0.05);
       for (const e of [...enemies.enemies]) {
@@ -390,11 +392,14 @@ export class PlayerController {
       this.anim.playOneShot('Melee_2H_Attack_Spinning', 0.05, 1.4, 2.5);
       this.whirlwindTimer = 2.5;
       this.whirlwindTick = 0.05;
-      this.vfx.spawnRing(this.pos, 3.8, 0xf97316, 0.4);
+      this.vfx.spawnRing(this.pos, 3.8, 0xf97316, 0.45);
+      this.vfx.spawnBurst(this.pos, 0xf97316, 18, 6);
     } else if (this.def.id === 'rogue') {
       // Fan of Knives: 10 piercing daggers 360 deg
       this.anim.playOneShot('Melee_Dualwield_Attack_Slice', 0.05, 1.5, 0.3);
       this.sound.playSwordClang(1.2);
+      this.vfx.spawnRing(this.pos, 3.2, 0x34d399, 0.3);
+      this.vfx.spawnBurst(this.pos.clone().add(new THREE.Vector3(0, 1, 0)), 0x34d399, 16, 5.5);
       const spawnPos = this.pos.clone().add(new THREE.Vector3(0, 1.1, 0));
       for (let i = 0; i < 10; i++) {
         const a = (i / 10) * Math.PI * 2;
@@ -402,28 +407,36 @@ export class PlayerController {
         this.spawnProjectile(spawnPos.clone(), dir.multiplyScalar(20), Math.round(dmg * 1.5), true, 2, 0, 0, 0x34d399);
       }
     } else if (this.def.id === 'mage') {
-      // Arcane Meteor Storm: 5 explosive blasts around cursor
+      // Arcane Meteor Storm: 5 falling meteors streaking from the sky
       this.anim.playOneShot('Ranged_Magic_Summon', 0.05, 1.4, 0.45);
-      this.sound.playExplosion();
       const targetCenter = aimWorld.clone().setY(0.1);
+      this.vfx.spawnRing(targetCenter, 4.2, 0xa855f7, 0.65);
       for (let i = 0; i < 5; i++) {
         const a = (i / 5) * Math.PI * 2;
         const r = i === 0 ? 0 : 2.3;
         const hitPos = targetCenter.clone().add(new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r));
-        this.triggerAoEExplosion(hitPos, 3.0, Math.round(dmg * 1.6), enemies, -1);
+        this.vfx.spawnFallingStrike(hitPos, i % 2 === 0 ? 0xff5500 : 0xa855f7, true, i * 0.08, () => {
+          this.triggerAoEExplosion(hitPos, 3.0, Math.round(dmg * 1.6), enemies, -1);
+        });
       }
     } else if (this.def.id === 'ranger') {
-      // Arrow Rain: 12 arrows raining onto cursor area
+      // Arrow Rain: 12 falling skyward arrows onto cursor area
       this.anim.playOneShot('Ranged_Bow_Release_Up', 0.05, 1.3, 0.4);
       this.sound.playBowTwang(1.3);
       const targetCenter = aimWorld.clone().setY(0.1);
-      this.vfx.spawnRing(targetCenter, 4.5, 0xfde047, 0.55);
-      this.vfx.spawnBurst(targetCenter.clone().add(new THREE.Vector3(0, 1.5, 0)), 0xfde047, 24, 7);
-      for (const e of [...enemies.enemies]) {
-        if (!e.dead && e.pos.distanceTo(targetCenter) <= 4.6) {
-          const dir = new THREE.Vector3().subVectors(e.pos, targetCenter).setY(0).normalize();
-          this.applyHitToEnemy(e, Math.round(dmg * 2.4), dir, true, enemies, 0.6);
-        }
+      this.vfx.spawnRing(targetCenter, 4.5, 0xfde047, 0.65);
+      for (let i = 0; i < 12; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const r = Math.random() * 3.6;
+        const hitPos = targetCenter.clone().add(new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r));
+        this.vfx.spawnFallingStrike(hitPos, 0xfde047, false, i * 0.035, i === 6 ? () => {
+          for (const e of [...enemies.enemies]) {
+            if (!e.dead && e.pos.distanceTo(targetCenter) <= 4.6) {
+              const dir = new THREE.Vector3().subVectors(e.pos, targetCenter).setY(0).normalize();
+              this.applyHitToEnemy(e, Math.round(dmg * 2.4), dir, true, enemies, 0.6);
+            }
+          }
+        } : undefined);
       }
     }
   }
@@ -437,46 +450,57 @@ export class PlayerController {
 
     if (this.def.id === 'knight') {
       // Shield Bash: forward dash + 3.2m AoE stun 1.8s
+      const startPos = this.pos.clone();
       this.anim.playOneShot('Melee_Block_Attack', 0.05, 1.3, 0.35);
       this.sound.playAxeThud(1.2);
       this.iFrames = Math.max(this.iFrames, 0.3);
       for (let s = 0; s < 6; s++) this.tryMove(forward.x * 0.55, forward.z * 0.55, dungeon);
-      this.vfx.spawnRing(this.pos, 3.3, 0x60a5fa, 0.32);
+      this.vfx.spawnDashTrail(startPos, this.pos, 0x60a5fa, 5);
+      this.vfx.spawnRing(this.pos, 3.3, 0x60a5fa, 0.35);
+      this.vfx.spawnBurst(this.pos.clone().add(new THREE.Vector3(0, 0.9, 0)), 0x93c5fd, 16, 5.5);
       this.vfx.addCameraShake(forward, 0.28);
       this.vfx.triggerHitStop(0.04);
       for (const e of [...enemies.enemies]) {
         if (!e.dead && e.pos.distanceTo(this.pos) <= 3.3) {
           const dir = new THREE.Vector3().subVectors(e.pos, this.pos).setY(0).normalize();
+          this.vfx.spawnSpriteFX(e.pos, 'slash', 2.4, 0x60a5fa);
           this.applyHitToEnemy(e, Math.round(dmg * 1.65), dir, true, enemies, 1.8);
         }
       }
     } else if (this.def.id === 'barbarian') {
       // Seismic Leap
+      const startPos = this.pos.clone();
       this.anim.playOneShot('Melee_2H_Attack_Chop', 0.05, 1.2, 0.42);
       this.sound.playExplosion();
       for (let s = 0; s < 8; s++) this.tryMove(forward.x * 0.65, forward.z * 0.65, dungeon);
+      this.vfx.spawnDashTrail(startPos, this.pos, 0xf97316, 6);
+      this.vfx.spawnConsecratedPillar(this.pos, 0xf97316, 2.2, 4.5);
       this.vfx.spawnRing(this.pos, 4.4, 0xf97316, 0.42);
-      this.vfx.spawnBurst(this.pos, 0xf97316, 18, 6);
+      this.vfx.spawnBurst(this.pos, 0xf97316, 22, 6.5);
       this.vfx.addCameraShake(forward, 0.4);
       this.vfx.triggerHitStop(0.04);
       for (const e of [...enemies.enemies]) {
         if (!e.dead && e.pos.distanceTo(this.pos) <= 4.4) {
           const dir = new THREE.Vector3().subVectors(e.pos, this.pos).setY(0).normalize();
+          this.vfx.spawnSpriteFX(e.pos, 'slash', 2.8, 0xf97316);
           this.applyHitToEnemy(e, Math.round(dmg * 2.1), dir, true, enemies, 1.4);
         }
       }
     } else if (this.def.id === 'rogue') {
       // Shadow Dash backstab
+      const startPos = this.pos.clone();
       this.anim.playOneShot('Melee_Dualwield_Attack_Stab', 0.05, 1.6, 0.3);
       this.sound.playDodge();
       this.iFrames = Math.max(this.iFrames, 0.35);
       this.vfx.spawnBurst(this.pos, 0x34d399, 12, 4);
       for (let s = 0; s < 10; s++) this.tryMove(forward.x * 0.6, forward.z * 0.6, dungeon);
-      this.vfx.spawnBurst(this.pos, 0x34d399, 14, 5);
+      this.vfx.spawnDashTrail(startPos, this.pos, 0x34d399, 7);
+      this.vfx.spawnBurst(this.pos, 0x34d399, 16, 5.5);
       this.vfx.spawnSlashArc(this.pos, this.aimYaw, 3.0, 0x34d399, true);
       this.vfx.triggerHitStop(0.04);
       for (const e of [...enemies.enemies]) {
         if (!e.dead && e.pos.distanceTo(this.pos) <= 3.0) {
+          this.vfx.spawnSpriteFX(e.pos, 'slash', 2.6, 0x34d399);
           this.applyHitToEnemy(e, Math.round(dmg * 2.4), forward, true, enemies, 0);
         }
       }

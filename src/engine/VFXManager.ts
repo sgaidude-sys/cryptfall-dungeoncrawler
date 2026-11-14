@@ -39,6 +39,15 @@ interface SpriteAnim {
   maxLife: number;
 }
 
+interface FallingStrike {
+  mesh: THREE.Mesh;
+  target: THREE.Vector3;
+  velY: number;
+  color: number;
+  isMeteor: boolean;
+  onImpact?: () => void;
+}
+
 interface FloatingText {
   el: HTMLDivElement;
   worldPos: THREE.Vector3;
@@ -53,6 +62,7 @@ export class VFXManager {
   private rings: RingEffect[] = [];
   private beams: BeamEffect[] = [];
   private sprites: SpriteAnim[] = [];
+  private falling: FallingStrike[] = [];
   private texts: FloatingText[] = [];
   private sheetCache = new Map<string, THREE.Texture>();
   private texLoader = new THREE.TextureLoader();
@@ -184,6 +194,42 @@ export class VFXManager {
         spin: new THREE.Vector3(6, 8, 5),
       });
     }
+  }
+
+  public spawnDashTrail(from: THREE.Vector3, to: THREE.Vector3, colorHex: number, steps = 6): void {
+    for (let i = 0; i <= steps; i++) {
+      const p = new THREE.Vector3().lerpVectors(from, to, i / steps);
+      p.y += 0.9;
+      this.spawnBurst(p, colorHex, 4, 2.6);
+    }
+  }
+
+  public spawnConsecratedPillar(pos: THREE.Vector3, colorHex = 0xfacc15, radius = 2.6, height = 6.5): void {
+    const geo = new THREE.CylinderGeometry(radius * 0.65, radius, height, 20, 1, true);
+    const mat = new THREE.MeshBasicMaterial({
+      color: colorHex,
+      transparent: true,
+      opacity: 0.55,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(pos.x, height / 2, pos.z);
+    this.scene.add(mesh);
+    this.rings.push({ mesh, life: 0.45, maxLife: 0.45, maxScale: 1.35 });
+  }
+
+  public spawnFallingStrike(target: THREE.Vector3, colorHex: number, isMeteor: boolean, delay = 0, onImpact?: () => void): void {
+    const geo = isMeteor
+      ? new THREE.DodecahedronGeometry(0.55, 0)
+      : new THREE.ConeGeometry(0.14, 1.35, 6);
+    if (!isMeteor) geo.rotateX(Math.PI);
+    const mat = new THREE.MeshBasicMaterial({ color: colorHex });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(target.x + (Math.random() - 0.5) * 1.2, 13 + delay * 28, target.z + (Math.random() - 0.5) * 1.2);
+    this.scene.add(mesh);
+    this.falling.push({ mesh, target: target.clone(), velY: isMeteor ? -34 : -42, color: colorHex, isMeteor, onImpact });
   }
 
   public spawnSpriteFX(pos: THREE.Vector3, sheetName: 'slash' | 'lightning', size = 2.4, colorHex = 0xffffff): void {
@@ -357,6 +403,26 @@ export class VFXManager {
       const row = Math.floor(frame / sp.cols);
       sp.tex.offset.set(col / sp.cols, 1 - (row + 1) / sp.rows);
       sp.mesh.quaternion.copy(camera.quaternion);
+    }
+
+    // Falling meteors & arrows
+    for (let i = this.falling.length - 1; i >= 0; i--) {
+      const f = this.falling[i];
+      f.mesh.position.y += f.velY * dt;
+      if (f.isMeteor) {
+        f.mesh.rotation.x += dt * 8;
+        f.mesh.rotation.z += dt * 6;
+      }
+      if (f.mesh.position.y <= 0.2) {
+        const hitPos = new THREE.Vector3(f.mesh.position.x, 0.1, f.mesh.position.z);
+        this.spawnRing(hitPos, f.isMeteor ? 3.2 : 1.3, f.color, f.isMeteor ? 0.38 : 0.22);
+        this.spawnBurst(hitPos, f.color, f.isMeteor ? 16 : 6, f.isMeteor ? 6.5 : 4.0);
+        f.onImpact?.();
+        this.scene.remove(f.mesh);
+        f.mesh.geometry.dispose();
+        (f.mesh.material as THREE.Material).dispose();
+        this.falling.splice(i, 1);
+      }
     }
 
     // Floating damage numbers
