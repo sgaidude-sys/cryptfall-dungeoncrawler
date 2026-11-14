@@ -320,7 +320,7 @@ export class GameEngine {
       startLook: new THREE.Vector3(0, 1.8, -3),
       endLook: new THREE.Vector3(0, 0.8, 0),
       title: 'Oakhaven Town Hub',
-      subtitle: 'Visit Runesmith Torgar, Vault Keeper Pip, Apothecary Myco — or speak to Warden Aldric.',
+      subtitle: 'Visit Runesmith Torgar, Vault Keeper Pip, Apothecary Sera — or speak to Warden Aldric.',
       onComplete: () => this.showBanner('Oakhaven Town — Press [U] Stats | [K] Skills'),
     });
   }

@@ -820,7 +820,7 @@ export class HUDManager {
         </div>
       `;
     } else if (npc === 'alchemist') {
-      title = '⚗ Apothecary Myco — Elixir Shop';
+      title = '⚗ Apothecary Sera — Elixir Shop';
       body = `
         <div style="font-size:13px;color:var(--muted)">Your Gold: <strong style="color:#fde047">${state.gold}g</strong></div>
         <div style="display:flex;gap:14px">

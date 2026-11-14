@@ -86,11 +86,12 @@ export class AssetManager {
       'props_fantasy/CandleStick_Triple.gltf',
       'props_fantasy/BookStand.gltf',
       'props_fantasy/Potion_1.gltf',
-      // Modular Fantasy Outfit NPCs
-      'npcs/Female_Peasant.gltf',
-      'npcs/Female_Ranger.gltf',
-      'npcs/Male_Peasant.gltf',
-      'npcs/Male_Ranger.gltf',
+      // Town NPCs (Female & Male Models)
+      'npcs/Male_Worker.gltf',
+      'npcs/Female_Medieval.gltf',
+      'npcs/Female_Witch.gltf',
+      'npcs/Female_Adventurer.gltf',
+      'npcs/Male_King.gltf',
     ];
 
     const animPaths = [
