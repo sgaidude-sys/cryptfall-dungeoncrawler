@@ -149,6 +149,8 @@ export class PlayerController {
         this.whirlwindTick = 0.22;
         this.sound.playAxeThud(0.85);
         this.vfx.spawnSlashArc(this.pos, this.mesh.rotation.y, 3.6, 0xf97316, true, 0.1);
+        this.vfx.spawnBrackeysGroundEffect(this.pos, 'twirl', 0xf97316, 4.2, 0.26, 12);
+        this.vfx.spawnBrackeysBurst(this.pos.clone().add(new THREE.Vector3(0, 1.0, 0)), 'flame', 0xff7722, 1.8, 0.24);
         for (const e of [...enemies.enemies]) {
           if (!e.dead && e.pos.distanceTo(this.pos) <= 3.7) {
             const dir = new THREE.Vector3().subVectors(e.pos, this.pos).setY(0).normalize();
@@ -326,6 +328,9 @@ export class PlayerController {
       this.impulseVel.addScaledVector(forward, -1.6);
 
       const spawnPos = this.pos.clone().add(new THREE.Vector3(forward.x * 0.7, 1.15, forward.z * 0.7));
+      if (this.def.id === 'ranger') {
+        this.vfx.spawnBrackeysBurst(spawnPos, 'spark', 0xfde047, 1.0, 0.16);
+      }
       this.spawnProjectile(
         spawnPos,
         forward.clone().multiplyScalar(this.def.id === 'ranger' ? 22 : 17),
@@ -350,6 +355,12 @@ export class PlayerController {
       const spriteKind = isRogue ? 'slash_rogue' : isFullCircle ? 'slash_barbarian' : 'slash';
 
       this.vfx.spawnSlashArc(this.pos, yaw, reach, parseInt(this.def.accentHex.slice(1), 16), isFullCircle, tilt, arcOverride, arcDur);
+      const accentColor = parseInt(this.def.accentHex.slice(1), 16);
+      if (isFullCircle) {
+        this.vfx.spawnBrackeysGroundEffect(this.pos, 'twirl', accentColor, 3.2, 0.24, 10);
+      } else {
+        this.vfx.spawnBrackeysSlash(this.pos, yaw, accentColor, isRogue ? 2.3 : 2.8, isRogue);
+      }
 
       let hitAny = false;
       for (const e of [...enemies.enemies]) {
@@ -386,6 +397,8 @@ export class PlayerController {
       this.sound.playExplosion();
       this.vfx.spawnConsecratedPillar(this.pos, 0xfacc15, 2.8, 7.5);
       this.vfx.spawnRing(this.pos, 5.2, 0xfacc15, 0.55);
+      this.vfx.spawnBrackeysGroundEffect(this.pos, 'magic_rune', 0xfacc15, 5.6, 0.65, 2);
+      this.vfx.spawnBrackeysGroundEffect(this.pos, 'scorch', 0xfde047, 4.6, 0.5, 0);
       this.vfx.spawnBurst(this.pos.clone().add(new THREE.Vector3(0, 1.0, 0)), 0xfde047, 24, 6.5);
       this.vfx.addCameraShake(forward, 0.35);
       this.vfx.triggerHitStop(0.05);
@@ -408,6 +421,7 @@ export class PlayerController {
       this.anim.playOneShot('Melee_Dualwield_Attack_Slice', 0.05, 1.5, 0.3);
       this.sound.playSwordClang(1.2);
       this.vfx.spawnRing(this.pos, 3.2, 0x34d399, 0.3);
+      this.vfx.spawnBrackeysGroundEffect(this.pos, 'twirl', 0x34d399, 3.6, 0.35, 10);
       this.vfx.spawnBurst(this.pos.clone().add(new THREE.Vector3(0, 1, 0)), 0x34d399, 16, 5.5);
       const spawnPos = this.pos.clone().add(new THREE.Vector3(0, 1.1, 0));
       for (let i = 0; i < 10; i++) {
@@ -420,11 +434,13 @@ export class PlayerController {
       this.anim.playOneShot('Ranged_Magic_Summon', 0.05, 1.4, 0.45);
       const targetCenter = aimWorld.clone().setY(0.1);
       this.vfx.spawnRing(targetCenter, 4.2, 0xa855f7, 0.65);
+      this.vfx.spawnBrackeysGroundEffect(targetCenter, 'magic_rune', 0xa855f7, 4.6, 0.65, 2);
       for (let i = 0; i < 5; i++) {
         const a = (i / 5) * Math.PI * 2;
         const r = i === 0 ? 0 : 2.3;
         const hitPos = targetCenter.clone().add(new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r));
         this.vfx.spawnFallingStrike(hitPos, i % 2 === 0 ? 0xff5500 : 0xa855f7, true, i * 0.08, () => {
+          this.vfx.spawnBrackeysGroundEffect(hitPos, 'scorch', 0xff5500, 3.2, 0.45, 0);
           this.triggerAoEExplosion(hitPos, 3.0, Math.round(dmg * 1.6), enemies, -1);
         });
       }
@@ -434,11 +450,13 @@ export class PlayerController {
       this.sound.playBowTwang(1.3);
       const targetCenter = aimWorld.clone().setY(0.1);
       this.vfx.spawnRing(targetCenter, 4.5, 0xfde047, 0.65);
+      this.vfx.spawnBrackeysGroundEffect(targetCenter, 'ring', 0xfde047, 4.8, 0.65, 2);
       for (let i = 0; i < 12; i++) {
         const a = Math.random() * Math.PI * 2;
         const r = Math.random() * 3.6;
         const hitPos = targetCenter.clone().add(new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r));
         this.vfx.spawnFallingStrike(hitPos, 0xfde047, false, i * 0.035, i === 6 ? () => {
+          this.vfx.spawnBrackeysBurst(targetCenter.clone().add(new THREE.Vector3(0, 0.8, 0)), 'spark', 0xfde047, 3.2, 0.35);
           for (const e of [...enemies.enemies]) {
             if (!e.dead && e.pos.distanceTo(targetCenter) <= 4.6) {
               const dir = new THREE.Vector3().subVectors(e.pos, targetCenter).setY(0).normalize();
@@ -466,6 +484,8 @@ export class PlayerController {
       for (let s = 0; s < 6; s++) this.tryMove(forward.x * 0.55, forward.z * 0.55, dungeon);
       this.vfx.spawnDashTrail(startPos, this.pos, 0x60a5fa, 5);
       this.vfx.spawnRing(this.pos, 3.3, 0x60a5fa, 0.35);
+      this.vfx.spawnBrackeysGroundEffect(this.pos, 'ring', 0x60a5fa, 3.8, 0.35, 3);
+      this.vfx.spawnBrackeysBurst(this.pos.clone().add(new THREE.Vector3(0, 1.0, 0)), 'spark', 0x93c5fd, 2.0, 0.28);
       this.vfx.spawnBurst(this.pos.clone().add(new THREE.Vector3(0, 0.9, 0)), 0x93c5fd, 16, 5.5);
       this.vfx.addCameraShake(forward, 0.28);
       this.vfx.triggerHitStop(0.04);
@@ -485,6 +505,8 @@ export class PlayerController {
       this.vfx.spawnDashTrail(startPos, this.pos, 0xf97316, 6);
       this.vfx.spawnConsecratedPillar(this.pos, 0xf97316, 2.2, 4.5);
       this.vfx.spawnRing(this.pos, 4.4, 0xf97316, 0.42);
+      this.vfx.spawnBrackeysGroundEffect(this.pos, 'scorch', 0xf97316, 4.8, 0.5, 0);
+      this.vfx.spawnBrackeysBurst(this.pos.clone().add(new THREE.Vector3(0, 0.8, 0)), 'smoke', 0xfdba74, 2.2, 0.36);
       this.vfx.spawnBurst(this.pos, 0xf97316, 22, 6.5);
       this.vfx.addCameraShake(forward, 0.4);
       this.vfx.triggerHitStop(0.04);
@@ -502,10 +524,12 @@ export class PlayerController {
       this.sound.playDodge();
       this.iFrames = Math.max(this.iFrames, 0.35);
       this.vfx.spawnBurst(this.pos, 0x34d399, 12, 4);
+      this.vfx.spawnBrackeysBurst(startPos.clone().add(new THREE.Vector3(0, 0.9, 0)), 'smoke', 0x10b981, 2.0, 0.32);
       for (let s = 0; s < 10; s++) this.tryMove(forward.x * 0.6, forward.z * 0.6, dungeon);
       this.vfx.spawnDashTrail(startPos, this.pos, 0x34d399, 7);
       this.vfx.spawnBurst(this.pos, 0x34d399, 16, 5.5);
       this.vfx.spawnSlashArc(this.pos, this.aimYaw, 3.0, 0x34d399, true);
+      this.vfx.spawnBrackeysGroundEffect(this.pos, 'twirl', 0x34d399, 3.2, 0.3, 8);
       this.vfx.triggerHitStop(0.04);
       for (const e of [...enemies.enemies]) {
         if (!e.dead && e.pos.distanceTo(this.pos) <= 3.0) {
@@ -524,6 +548,7 @@ export class PlayerController {
       this.anim.playOneShot('Ranged_Bow_Release', 0.05, 1.4, 0.3);
       this.sound.playBowTwang(1.2);
       const spawnPos = this.pos.clone().add(new THREE.Vector3(forward.x * 0.7, 1.15, forward.z * 0.7));
+      this.vfx.spawnBrackeysBurst(spawnPos, 'spark', 0xfde047, 1.5, 0.22);
       for (let i = -2; i <= 2; i++) {
         const a = this.aimYaw + i * 0.16;
         const dir = new THREE.Vector3(Math.sin(a), 0, Math.cos(a));
@@ -591,6 +616,8 @@ export class PlayerController {
             p.explosiveRadius > 0 ? 1.35 : 0.85,
             0.24
           );
+        } else if (p.kind === 'arrow') {
+          this.vfx.spawnBrackeysBurst(p.mesh.position, 'spark', 0xfde047, 0.65, 0.16);
         } else {
           this.vfx.spawnTrailSpark(p.mesh.position, p.color, 0.65);
         }

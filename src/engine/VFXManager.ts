@@ -56,6 +56,19 @@ interface FloatingText {
   vy: number;
 }
 
+export type BrackeysTexKey =
+  | 'fire_orb'
+  | 'flame'
+  | 'flare'
+  | 'magic_rune'
+  | 'ring'
+  | 'slash'
+  | 'scratch'
+  | 'twirl'
+  | 'spark'
+  | 'smoke'
+  | 'scorch';
+
 export class VFXManager {
   private particles: Particle[] = [];
   private slashes: SlashArc[] = [];
@@ -242,7 +255,7 @@ export class VFXManager {
     this.falling.push({ mesh, target: target.clone(), velY: isMeteor ? -34 : -42, color: colorHex, isMeteor, onImpact });
   }
 
-  private getBrackeysTex(key: 'fire_orb' | 'flame' | 'flare' | 'magic_rune' | 'ring'): THREE.Texture {
+  private getBrackeysTex(key: BrackeysTexKey): THREE.Texture {
     const cacheKey = `brackeys_${key}`;
     let tex = this.sheetCache.get(cacheKey);
     if (!tex) {
@@ -292,7 +305,7 @@ export class VFXManager {
 
   public spawnBrackeysBurst(
     pos: THREE.Vector3,
-    texKey: 'fire_orb' | 'flame' | 'flare' | 'magic_rune' | 'ring',
+    texKey: BrackeysTexKey,
     colorHex: number,
     scale = 1.1,
     life = 0.28
@@ -318,6 +331,61 @@ export class VFXManager {
       gravity: 0,
       spin: new THREE.Vector3(0, 0, 3.5),
     });
+  }
+
+  public spawnBrackeysGroundEffect(
+    pos: THREE.Vector3,
+    texKey: BrackeysTexKey,
+    colorHex: number,
+    maxScale = 3.5,
+    life = 0.35,
+    spinSpeed = 6
+  ): void {
+    const geo = new THREE.PlaneGeometry(2, 2);
+    geo.rotateX(-Math.PI / 2);
+    const mat = new THREE.MeshBasicMaterial({
+      map: this.getBrackeysTex(texKey),
+      color: colorHex,
+      transparent: true,
+      opacity: 0.88,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(pos.x, 0.08, pos.z);
+    mesh.rotation.y = Math.random() * Math.PI * 2;
+    mesh.scale.setScalar(0.35);
+    this.scene.add(mesh);
+    if (spinSpeed !== 0) {
+      this.slashes.push({ mesh, life, maxLife: life, startYaw: mesh.rotation.y });
+    }
+    this.rings.push({ mesh, life, maxLife: life, maxScale });
+  }
+
+  public spawnBrackeysSlash(
+    pos: THREE.Vector3,
+    yaw: number,
+    colorHex: number,
+    scale = 2.6,
+    isScratch = false
+  ): void {
+    const geo = new THREE.PlaneGeometry(scale, scale);
+    geo.rotateX(-Math.PI / 2);
+    const mat = new THREE.MeshBasicMaterial({
+      map: this.getBrackeysTex(isScratch ? 'scratch' : 'slash'),
+      color: colorHex,
+      transparent: true,
+      opacity: 0.95,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(pos.x + Math.sin(yaw) * (scale * 0.32), 1.05, pos.z + Math.cos(yaw) * (scale * 0.32));
+    mesh.rotation.y = yaw;
+    this.scene.add(mesh);
+    this.slashes.push({ mesh, life: 0.16, maxLife: 0.16, startYaw: yaw });
   }
 
   public spawnTrailSpark(pos: THREE.Vector3, colorHex: number, scale = 0.7): void {
