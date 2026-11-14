@@ -226,7 +226,7 @@ export class AssetManager {
     const bone = character.getObjectByName(slotName);
     if (!bone) return;
     const weapon = this.cloneProp(weaponPath);
-    weapon.scale.setScalar(1.2);
+    weapon.scale.setScalar(weaponPath.includes('shield') ? 1.25 : 1.45);
     if (weaponPath.includes('bow_withString')) {
       weapon.rotation.set(0, Math.PI * 0.5, 0);
     } else if (weaponPath.includes('shield')) {

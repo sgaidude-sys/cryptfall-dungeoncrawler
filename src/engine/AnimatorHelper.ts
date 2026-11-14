@@ -32,11 +32,20 @@ export class AnimatorHelper {
     if (this.oneshotTimer > 0) return;
     if (this.currentName === clipName) {
       const act = this.actions.get(clipName);
-      if (act) act.timeScale = timeScale;
+      if (act) {
+        act.timeScale = timeScale;
+        if (!act.isRunning()) act.play();
+      }
       return;
     }
     const next = this.getAction(clipName);
     if (!next) return;
+    for (const [name, act] of this.actions) {
+      if (name !== clipName && name !== this.currentName) {
+        act.stop();
+      }
+    }
+    next.enabled = true;
     next.reset().setEffectiveTimeScale(timeScale).setEffectiveWeight(1);
     next.setLoop(THREE.LoopRepeat, Infinity);
     next.play();
@@ -46,15 +55,25 @@ export class AnimatorHelper {
     this.currentName = clipName;
   }
 
-  public playOneShot(clipName: string, fade = 0.08, timeScale = 1.25, lockDuration?: number): void {
+  public playOneShot(clipName: string, fade = 0.05, timeScale = 1.25, lockDuration?: number): void {
     const next = this.getAction(clipName);
     if (!next) return;
+    // Stop any stale actions so Idle/Run never bleed weight into the swing
+    for (const [name, act] of this.actions) {
+      if (name !== clipName && name !== this.currentName) {
+        act.stop();
+      }
+    }
+    const prev = this.currentName && this.currentName !== clipName ? this.actions.get(this.currentName) : undefined;
+    next.enabled = true;
     next.reset().setEffectiveTimeScale(timeScale).setEffectiveWeight(1);
     next.setLoop(THREE.LoopOnce, 1);
     next.clampWhenFinished = true;
     next.play();
-    if (this.currentName && this.currentName !== clipName && this.actions.has(this.currentName)) {
-      this.actions.get(this.currentName)!.crossFadeTo(next, fade, false);
+    if (prev && fade > 0) {
+      prev.crossFadeTo(next, fade, false);
+    } else if (prev) {
+      prev.stop();
     }
     this.currentName = clipName;
     this.oneshotTimer = lockDuration ?? (next.getClip().duration / timeScale) * 0.85;
