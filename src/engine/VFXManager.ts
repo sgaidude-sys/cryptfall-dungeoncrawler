@@ -103,9 +103,19 @@ export class VFXManager {
     return this.shakeOffset;
   }
 
-  public spawnSlashArc(pos: THREE.Vector3, yaw: number, radius: number, colorHex: number, fullCircle = false, tilt = 0.28): void {
-    const arcAngle = fullCircle ? Math.PI * 1.9 : Math.PI * 0.95;
-    const geo = new THREE.RingGeometry(radius * 0.48, radius, 24, 1, -arcAngle / 2, arcAngle);
+  public spawnSlashArc(
+    pos: THREE.Vector3,
+    yaw: number,
+    radius: number,
+    colorHex: number,
+    fullCircle = false,
+    tilt = 0.28,
+    arcAngleOverride?: number,
+    duration = 0.14
+  ): void {
+    const arcAngle = arcAngleOverride ?? (fullCircle ? Math.PI * 1.9 : Math.PI * 0.78);
+    const innerR = arcAngleOverride && arcAngleOverride < 1.3 ? radius * 0.68 : radius * 0.48;
+    const geo = new THREE.RingGeometry(innerR, radius, 24, 1, -arcAngle / 2, arcAngle);
     geo.rotateX(-Math.PI / 2);
     const mat = new THREE.MeshBasicMaterial({
       color: colorHex,
@@ -121,7 +131,7 @@ export class VFXManager {
     mesh.rotation.y = yaw - Math.PI / 2 - 0.35;
     mesh.rotation.x = fullCircle ? 0.05 : tilt;
     this.scene.add(mesh);
-    this.slashes.push({ mesh, life: 0.14, maxLife: 0.14, startYaw: mesh.rotation.y });
+    this.slashes.push({ mesh, life: duration, maxLife: duration, startYaw: mesh.rotation.y });
   }
 
   public spawnRing(pos: THREE.Vector3, maxScale: number, colorHex: number, duration = 0.35): void {
@@ -232,22 +242,54 @@ export class VFXManager {
     this.falling.push({ mesh, target: target.clone(), velY: isMeteor ? -34 : -42, color: colorHex, isMeteor, onImpact });
   }
 
-  public spawnSpriteFX(pos: THREE.Vector3, sheetName: 'slash' | 'lightning', size = 2.4, colorHex = 0xffffff): void {
-    const path = sheetName === 'slash' ? './assets/vfx/slash_sheet.png' : './assets/vfx/lightning_sheet.png';
+  public spawnTrailSpark(pos: THREE.Vector3, colorHex: number, scale = 0.7): void {
+    const mat = new THREE.MeshBasicMaterial({
+      color: colorHex,
+      transparent: true,
+      opacity: 0.85,
+      blending: THREE.AdditiveBlending,
+    });
+    const mesh = new THREE.Mesh(this.sparkGeo, mat);
+    mesh.position.copy(pos);
+    mesh.scale.setScalar(scale);
+    this.scene.add(mesh);
+    this.particles.push({
+      mesh,
+      vel: new THREE.Vector3((Math.random() - 0.5) * 0.8, 0.4, (Math.random() - 0.5) * 0.8),
+      life: 0.18,
+      maxLife: 0.18,
+      gravity: 0,
+      spin: new THREE.Vector3(4, 4, 4),
+    });
+  }
+
+  public spawnSpriteFX(
+    pos: THREE.Vector3,
+    sheetName: 'slash' | 'slash_rogue' | 'slash_barbarian' | 'lightning' | 'magic_hit' | 'fire_hit' | 'arrow_hit',
+    size = 2.4,
+    colorHex = 0xffffff
+  ): void {
+    const cfgs: Record<string, { path: string; cols: number; rows: number; frames: number; dur: number }> = {
+      slash: { path: './assets/vfx/slash_sheet.png', cols: 5, rows: 2, frames: 9, dur: 0.22 },
+      slash_rogue: { path: './assets/vfx/slash_rogue.png', cols: 5, rows: 2, frames: 9, dur: 0.16 },
+      slash_barbarian: { path: './assets/vfx/slash_barbarian.png', cols: 5, rows: 2, frames: 9, dur: 0.25 },
+      lightning: { path: './assets/vfx/lightning_sheet.png', cols: 8, rows: 1, frames: 8, dur: 0.26 },
+      magic_hit: { path: './assets/vfx/magic_hit.png', cols: 7, rows: 7, frames: 42, dur: 0.34 },
+      fire_hit: { path: './assets/vfx/fire_hit.png', cols: 8, rows: 8, frames: 56, dur: 0.42 },
+      arrow_hit: { path: './assets/vfx/arrow_hit.png', cols: 6, rows: 6, frames: 32, dur: 0.26 },
+    };
+    const cfg = cfgs[sheetName];
     let baseTex = this.sheetCache.get(sheetName);
     if (!baseTex) {
-      baseTex = this.texLoader.load(path);
+      baseTex = this.texLoader.load(cfg.path);
       baseTex.magFilter = THREE.NearestFilter;
       baseTex.minFilter = THREE.NearestFilter;
       this.sheetCache.set(sheetName, baseTex);
     }
     const tex = baseTex.clone();
     tex.needsUpdate = true;
-    const cols = sheetName === 'slash' ? 5 : 8;
-    const rows = sheetName === 'slash' ? 2 : 1;
-    const frames = sheetName === 'slash' ? 9 : 8;
-    tex.repeat.set(1 / cols, 1 / rows);
-    tex.offset.set(0, 1 - 1 / rows);
+    tex.repeat.set(1 / cfg.cols, 1 / cfg.rows);
+    tex.offset.set(0, 1 - 1 / cfg.rows);
 
     const geo = new THREE.PlaneGeometry(size, size);
     const mat = new THREE.MeshBasicMaterial({
@@ -261,7 +303,7 @@ export class VFXManager {
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set(pos.x, pos.y + 1.15, pos.z);
     this.scene.add(mesh);
-    this.sprites.push({ mesh, tex, cols, rows, frames, life: 0.24, maxLife: 0.24 });
+    this.sprites.push({ mesh, tex, cols: cfg.cols, rows: cfg.rows, frames: cfg.frames, life: cfg.dur, maxLife: cfg.dur });
   }
 
   public spawnLightningArc(from: THREE.Vector3, to: THREE.Vector3, colorHex = 0x7dd3fc): void {

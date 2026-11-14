@@ -19,6 +19,8 @@ interface PlayerProjectile {
   hitIds: Set<number>;
   life: number;
   color: number;
+  kind: 'arrow' | 'magic' | 'dagger';
+  trailTimer: number;
 }
 
 export class PlayerController {
@@ -331,7 +333,8 @@ export class PlayerController {
         0,
         this.hasRelic('ricochet') ? 1 : 0,
         0,
-        this.def.projectileColor ?? 0xfde047
+        this.def.projectileColor ?? 0xfde047,
+        this.def.id === 'ranger' ? 'arrow' : 'magic'
       );
     } else {
       if (this.def.id === 'barbarian') this.sound.playAxeThud();
@@ -339,8 +342,13 @@ export class PlayerController {
 
       const reach = this.def.range + (this.hasRelic('ricochet') ? 0.7 : 0);
       const isFullCircle = this.def.id === 'barbarian';
-      const tilt = combo % 2 === 0 ? 0.32 : -0.32;
-      this.vfx.spawnSlashArc(this.pos, yaw, reach, parseInt(this.def.accentHex.slice(1), 16), isFullCircle, tilt);
+      const isRogue = this.def.id === 'rogue';
+      const tilt = isRogue ? (combo % 2 === 0 ? 0.68 : -0.68) : (combo % 2 === 0 ? 0.28 : -0.28);
+      const arcOverride = isRogue ? Math.PI * 0.34 : undefined;
+      const arcDur = isRogue ? 0.09 : isFullCircle ? 0.18 : 0.14;
+      const spriteKind = isRogue ? 'slash_rogue' : isFullCircle ? 'slash_barbarian' : 'slash';
+
+      this.vfx.spawnSlashArc(this.pos, yaw, reach, parseInt(this.def.accentHex.slice(1), 16), isFullCircle, tilt, arcOverride, arcDur);
 
       let hitAny = false;
       for (const e of [...enemies.enemies]) {
@@ -351,7 +359,7 @@ export class PlayerController {
           const dir = dist > 0.01 ? toE.clone().divideScalar(dist) : forward;
           if (isFullCircle || forward.dot(dir) > 0.15 || dist < 1.2) {
             this.applyHitToEnemy(e, dmg, dir, isCrit, enemies, 0);
-            this.vfx.spawnSpriteFX(e.pos, 'slash', isCrit ? 2.6 : 1.9, parseInt(this.def.accentHex.slice(1), 16));
+            this.vfx.spawnSpriteFX(e.pos, spriteKind, isCrit ? 2.6 : 1.9, parseInt(this.def.accentHex.slice(1), 16));
             hitAny = true;
           }
         }
@@ -404,7 +412,7 @@ export class PlayerController {
       for (let i = 0; i < 10; i++) {
         const a = (i / 10) * Math.PI * 2;
         const dir = new THREE.Vector3(Math.sin(a), 0, Math.cos(a));
-        this.spawnProjectile(spawnPos.clone(), dir.multiplyScalar(20), Math.round(dmg * 1.5), true, 2, 0, 0, 0x34d399);
+        this.spawnProjectile(spawnPos.clone(), dir.multiplyScalar(20), Math.round(dmg * 1.5), true, 2, 0, 0, 0x34d399, 'dagger');
       }
     } else if (this.def.id === 'mage') {
       // Arcane Meteor Storm: 5 falling meteors streaking from the sky
@@ -509,7 +517,7 @@ export class PlayerController {
       this.anim.playOneShot('Ranged_Magic_Spellcasting', 0.05, 1.4, 0.35);
       this.sound.playArcaneBlast(1.2);
       const spawnPos = this.pos.clone().add(new THREE.Vector3(forward.x * 0.8, 1.2, forward.z * 0.8));
-      this.spawnProjectile(spawnPos, forward.clone().multiplyScalar(15), Math.round(dmg * 2.1), true, 3, 0, 3.6, 0xff5500);
+      this.spawnProjectile(spawnPos, forward.clone().multiplyScalar(15), Math.round(dmg * 2.1), true, 3, 0, 3.6, 0xff5500, 'magic');
     } else if (this.def.id === 'ranger') {
       // Multi-Arrow Volley (5 arrows)
       this.anim.playOneShot('Ranged_Bow_Release', 0.05, 1.4, 0.3);
@@ -518,7 +526,7 @@ export class PlayerController {
       for (let i = -2; i <= 2; i++) {
         const a = this.aimYaw + i * 0.16;
         const dir = new THREE.Vector3(Math.sin(a), 0, Math.cos(a));
-        this.spawnProjectile(spawnPos.clone(), dir.multiplyScalar(22), Math.round(dmg * 1.1), i === 0, 1, this.hasRelic('ricochet') ? 1 : 0, 0, 0xfde047);
+        this.spawnProjectile(spawnPos.clone(), dir.multiplyScalar(22), Math.round(dmg * 1.1), i === 0, 1, this.hasRelic('ricochet') ? 1 : 0, 0, 0xfde047, 'arrow');
       }
     }
   }
@@ -531,12 +539,24 @@ export class PlayerController {
     pierce: number,
     bounces: number,
     explosiveRadius: number,
-    color: number
+    color: number,
+    kind: 'arrow' | 'magic' | 'dagger' = 'magic'
   ): void {
-    const mat = new THREE.MeshBasicMaterial({ color });
-    const mesh = new THREE.Mesh(this.projGeo, mat);
+    let mesh: THREE.Object3D;
+    if (kind === 'arrow') {
+      const grp = new THREE.Group();
+      const arrowModel = this.assets.cloneProp('weapons/arrow_bow.gltf');
+      arrowModel.rotation.x = Math.PI / 2;
+      arrowModel.scale.setScalar(1.35);
+      grp.add(arrowModel);
+      grp.rotation.y = Math.atan2(vel.x, vel.z);
+      mesh = grp;
+    } else {
+      const mat = new THREE.MeshBasicMaterial({ color });
+      mesh = new THREE.Mesh(this.projGeo, mat);
+      if (explosiveRadius > 0) mesh.scale.setScalar(1.75);
+    }
     mesh.position.copy(pos);
-    if (explosiveRadius > 0) mesh.scale.setScalar(1.65);
     this.scene.add(mesh);
     this.projectiles.push({
       mesh,
@@ -549,6 +569,8 @@ export class PlayerController {
       hitIds: new Set(),
       life: 1.6,
       color,
+      kind,
+      trailTimer: 0,
     });
   }
 
@@ -557,6 +579,11 @@ export class PlayerController {
       const p = this.projectiles[i];
       p.life -= dt;
       p.mesh.position.addScaledVector(p.vel, dt);
+      p.trailTimer -= dt;
+      if (p.trailTimer <= 0) {
+        p.trailTimer = p.kind === 'arrow' ? 0.035 : 0.028;
+        this.vfx.spawnTrailSpark(p.mesh.position, p.color, p.explosiveRadius > 0 ? 1.25 : 0.65);
+      }
 
       const wallHit = !dungeon.isWalkable(p.mesh.position.x, p.mesh.position.z, 0.15);
       let consumed = p.life <= 0 || wallHit;
@@ -571,6 +598,14 @@ export class PlayerController {
             const dir = p.vel.clone().setY(0).normalize();
             this.applyHitToEnemy(e, p.damage, dir, p.isCrit, enemies, 0);
 
+            if (p.kind === 'arrow') {
+              this.vfx.spawnSpriteFX(e.pos, 'arrow_hit', 2.0, 0xfde047);
+            } else if (p.kind === 'dagger') {
+              this.vfx.spawnSpriteFX(e.pos, 'slash_rogue', 2.0, 0x34d399);
+            } else if (p.explosiveRadius === 0) {
+              this.vfx.spawnSpriteFX(e.pos, 'magic_hit', 2.3, 0xa855f7);
+            }
+
             if (p.explosiveRadius > 0) {
               this.triggerAoEExplosion(p.mesh.position, p.explosiveRadius, p.damage, enemies, e.id);
             }
@@ -583,6 +618,7 @@ export class PlayerController {
               if (next) {
                 const spd = p.vel.length();
                 p.vel.subVectors(next.pos, p.mesh.position).setY(0).normalize().multiplyScalar(spd);
+                if (p.kind === 'arrow') p.mesh.rotation.y = Math.atan2(p.vel.x, p.vel.z);
               } else {
                 consumed = true;
               }
@@ -605,6 +641,7 @@ export class PlayerController {
 
   private triggerAoEExplosion(center: THREE.Vector3, radius: number, dmg: number, enemies: EnemyManager, skipId: number): void {
     this.sound.playExplosion();
+    this.vfx.spawnSpriteFX(center, 'fire_hit', radius * 1.15, 0xff8833);
     this.vfx.spawnRing(center, radius, 0xff6600, 0.35);
     this.vfx.spawnBurst(center, 0xff8822, 16, 6);
     this.vfx.addCameraShake(new THREE.Vector3(0, 1, 0), 0.25);
