@@ -35,9 +35,12 @@ export class PlayerController {
 
   public attackCd = 0;
   public skillCd = 0;
+  public ultCd = 0;
   public dodgeCd = 0;
   public dodgeMaxCd = 1.45;
   public iFrames = 0;
+  private whirlwindTimer = 0;
+  private whirlwindTick = 0;
 
   private dodgeTimer = 0;
   private dodgeDir = new THREE.Vector3();
@@ -123,6 +126,7 @@ export class PlayerController {
     aimWorld: THREE.Vector3,
     attackHeld: boolean,
     skillPressed: boolean,
+    ultPressed: boolean,
     dodgePressed: boolean,
     dungeon: DungeonFloorBuilder,
     enemies: EnemyManager
@@ -130,8 +134,27 @@ export class PlayerController {
     this.anim.update(dt);
     if (this.attackCd > 0) this.attackCd = Math.max(0, this.attackCd - dt);
     if (this.skillCd > 0) this.skillCd = Math.max(0, this.skillCd - dt);
+    if (this.ultCd > 0) this.ultCd = Math.max(0, this.ultCd - dt);
     if (this.dodgeCd > 0) this.dodgeCd = Math.max(0, this.dodgeCd - dt);
     if (this.iFrames > 0) this.iFrames = Math.max(0, this.iFrames - dt);
+
+    // Barbarian Bloodlust Tempest whirlwind loop
+    if (this.whirlwindTimer > 0) {
+      this.whirlwindTimer -= dt;
+      this.whirlwindTick -= dt;
+      this.mesh.rotation.y += dt * 16;
+      if (this.whirlwindTick <= 0) {
+        this.whirlwindTick = 0.22;
+        this.sound.playAxeThud(0.85);
+        this.vfx.spawnSlashArc(this.pos, this.mesh.rotation.y, 3.6, 0xf97316, true, 0.1);
+        for (const e of [...enemies.enemies]) {
+          if (!e.dead && e.pos.distanceTo(this.pos) <= 3.7) {
+            const dir = new THREE.Vector3().subVectors(e.pos, this.pos).setY(0).normalize();
+            this.applyHitToEnemy(e, Math.round(this.def.damage * 0.85), dir, Math.random() < 0.35, enemies, 0);
+          }
+        }
+      }
+    }
 
     // Apply physical lunge / knockback impulse
     if (this.impulseVel.lengthSq() > 0.01) {
@@ -222,10 +245,12 @@ export class PlayerController {
         this.anim.playLoop('Idle_A', 0.14);
       }
 
-      // Signature Active Skill
-      if (skillPressed && this.skillCd <= 0) {
+      // Signature Active Skills & Ultimate
+      if (ultPressed && this.ultCd <= 0) {
+        this.useUltimate(aimWorld, enemies);
+      } else if (skillPressed && this.skillCd <= 0) {
         this.useActiveSkill(dungeon, enemies);
-      } else if (attackHeld && this.attackCd <= 0) {
+      } else if (attackHeld && this.attackCd <= 0 && this.whirlwindTimer <= 0) {
         this.usePrimaryAttack(enemies);
       }
     }
@@ -334,6 +359,71 @@ export class PlayerController {
       if (hitAny) {
         this.vfx.triggerHitStop(isCrit || this.def.id === 'barbarian' ? 0.048 : 0.024);
         this.vfx.addCameraShake(forward, isCrit ? 0.26 : this.def.id === 'barbarian' ? 0.18 : 0.10);
+      }
+    }
+  }
+
+  private useUltimate(aimWorld: THREE.Vector3, enemies: EnemyManager): void {
+    this.ultCd = this.def.ultCooldown * this.getCdMult();
+    this.sound.playBattleCry();
+    const { dmg } = this.getDamageStat();
+    const forward = new THREE.Vector3(Math.sin(this.aimYaw), 0, Math.cos(this.aimYaw));
+
+    if (this.def.id === 'knight') {
+      // Aegis Judgment: Heal +25, 2s i-frames, 5m consecrated lightning smite
+      this.anim.playOneShot('Melee_1H_Attack_Jump_Chop', 0.05, 1.15, 0.45);
+      this.heal(25);
+      this.iFrames = Math.max(this.iFrames, 2.0);
+      this.sound.playExplosion();
+      this.vfx.spawnRing(this.pos, 5.2, 0xfacc15, 0.55);
+      this.vfx.addCameraShake(forward, 0.35);
+      this.vfx.triggerHitStop(0.05);
+      for (const e of [...enemies.enemies]) {
+        if (!e.dead && e.pos.distanceTo(this.pos) <= 5.2) {
+          const dir = new THREE.Vector3().subVectors(e.pos, this.pos).setY(0).normalize();
+          this.vfx.spawnLightningArc(this.pos, e.pos, 0xfde047);
+          this.applyHitToEnemy(e, Math.round(dmg * 2.2), dir, true, enemies, 1.2);
+        }
+      }
+    } else if (this.def.id === 'barbarian') {
+      // Bloodlust Tempest: 2.5s spinning whirlwind
+      this.anim.playOneShot('Melee_2H_Attack_Spinning', 0.05, 1.4, 2.5);
+      this.whirlwindTimer = 2.5;
+      this.whirlwindTick = 0.05;
+      this.vfx.spawnRing(this.pos, 3.8, 0xf97316, 0.4);
+    } else if (this.def.id === 'rogue') {
+      // Fan of Knives: 10 piercing daggers 360 deg
+      this.anim.playOneShot('Melee_Dualwield_Attack_Slice', 0.05, 1.5, 0.3);
+      this.sound.playSwordClang(1.2);
+      const spawnPos = this.pos.clone().add(new THREE.Vector3(0, 1.1, 0));
+      for (let i = 0; i < 10; i++) {
+        const a = (i / 10) * Math.PI * 2;
+        const dir = new THREE.Vector3(Math.sin(a), 0, Math.cos(a));
+        this.spawnProjectile(spawnPos.clone(), dir.multiplyScalar(20), Math.round(dmg * 1.5), true, 2, 0, 0, 0x34d399);
+      }
+    } else if (this.def.id === 'mage') {
+      // Arcane Meteor Storm: 5 explosive blasts around cursor
+      this.anim.playOneShot('Ranged_Magic_Summon', 0.05, 1.4, 0.45);
+      this.sound.playExplosion();
+      const targetCenter = aimWorld.clone().setY(0.1);
+      for (let i = 0; i < 5; i++) {
+        const a = (i / 5) * Math.PI * 2;
+        const r = i === 0 ? 0 : 2.3;
+        const hitPos = targetCenter.clone().add(new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r));
+        this.triggerAoEExplosion(hitPos, 3.0, Math.round(dmg * 1.6), enemies, -1);
+      }
+    } else if (this.def.id === 'ranger') {
+      // Arrow Rain: 12 arrows raining onto cursor area
+      this.anim.playOneShot('Ranged_Bow_Release_Up', 0.05, 1.3, 0.4);
+      this.sound.playBowTwang(1.3);
+      const targetCenter = aimWorld.clone().setY(0.1);
+      this.vfx.spawnRing(targetCenter, 4.5, 0xfde047, 0.55);
+      this.vfx.spawnBurst(targetCenter.clone().add(new THREE.Vector3(0, 1.5, 0)), 0xfde047, 24, 7);
+      for (const e of [...enemies.enemies]) {
+        if (!e.dead && e.pos.distanceTo(targetCenter) <= 4.6) {
+          const dir = new THREE.Vector3().subVectors(e.pos, targetCenter).setY(0).normalize();
+          this.applyHitToEnemy(e, Math.round(dmg * 2.4), dir, true, enemies, 0.6);
+        }
       }
     }
   }

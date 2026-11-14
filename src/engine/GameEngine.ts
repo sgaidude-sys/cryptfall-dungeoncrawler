@@ -50,6 +50,7 @@ export class GameEngine {
   private aimWorld = new THREE.Vector3();
   private attackHeld = false;
   private skillQueued = false;
+  private ultQueued = false;
   private dodgeQueued = false;
   private interactQueued = false;
   private lastTime = performance.now();
@@ -107,7 +108,9 @@ export class GameEngine {
       () => this.returnToTitle(),
       () => this.sound.playUIHover(),
       () => { this.sound.unlock(); this.sound.playUISelect(); },
-      () => this.sound.playUIPopup()
+      () => this.sound.playUIPopup(),
+      () => this.togglePause(),
+      () => this.startRun()
     );
 
     this.bindInputs();
@@ -151,8 +154,23 @@ export class GameEngine {
     this.previewAnim.playLoop('Idle_A', 0.1);
   }
 
+  private togglePause(): void {
+    if (this.phase === 'playing') {
+      this.phase = 'paused';
+      this.attackHeld = false;
+      this.sound.playUIPopup();
+    } else if (this.phase === 'paused') {
+      this.phase = 'playing';
+      this.sound.playUISelect();
+    }
+  }
+
   private startRun(): void {
     this.sound.unlock();
+    if (this.player) {
+      this.player.destroy();
+      this.player = null;
+    }
     if (this.previewModel) {
       this.scene.remove(this.previewModel);
       this.previewModel = null;
@@ -222,8 +240,13 @@ export class GameEngine {
         this.cutscenes.skip();
         return;
       }
+      if (k === 'escape' && (this.phase === 'playing' || this.phase === 'paused')) {
+        this.togglePause();
+        return;
+      }
       this.keys.add(k);
-      if (k === 'q') this.skillQueued = true;
+      if (k === 'q' || k === '1') this.skillQueued = true;
+      if (k === 'r' || k === '2') this.ultQueued = true;
       if (k === ' ' || k === 'shift') this.dodgeQueued = true;
       if (k === 'e' || k === 'f') this.interactQueued = true;
       if (k === 'm') this.sound.toggleMute();
@@ -306,11 +329,13 @@ export class GameEngine {
         this.aimWorld,
         this.attackHeld,
         this.skillQueued,
+        this.ultQueued,
         this.dodgeQueued,
         this.dungeon,
         this.enemies
       );
       this.skillQueued = false;
+      this.ultQueued = false;
       this.dodgeQueued = false;
 
       this.enemies.update(dt, this.player.pos, this.dungeon, (dmg, dir) => {
@@ -463,6 +488,8 @@ export class GameEngine {
       maxHp: this.player?.maxHp ?? 100,
       skillCd: this.player?.skillCd ?? 0,
       skillMaxCd: this.player?.def.skillCooldown ?? 1,
+      ultCd: this.player?.ultCd ?? 0,
+      ultMaxCd: this.player?.def.ultCooldown ?? 1,
       dodgeCd: this.player?.dodgeCd ?? 0,
       dodgeMaxCd: this.player?.dodgeMaxCd ?? 1,
       relics: this.player?.relics ?? [],

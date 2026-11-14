@@ -15,7 +15,9 @@ export class HUDManager {
     private onRestart: () => void,
     private onUIHover?: () => void,
     private onUISelect?: () => void,
-    private onUIPopup?: () => void
+    private onUIPopup?: () => void,
+    private onTogglePause?: () => void,
+    private onRestartRun?: () => void
   ) {
     this.root = document.getElementById('ui-root')!;
   }
@@ -85,6 +87,14 @@ export class HUDManager {
       return;
     }
 
+    if (state.phase === 'paused') {
+      if (this.lastPhase !== 'paused') {
+        this.lastPhase = 'paused';
+        this.renderPause(state);
+      }
+      return;
+    }
+
     // Playing HUD
     if (this.lastPhase !== 'playing') {
       this.lastPhase = 'playing';
@@ -130,6 +140,7 @@ export class HUDManager {
             <div class="ability-list">
               <div class="ability-item"><strong>[LMB] ${cls.primaryName}:</strong> ${cls.primaryDesc}</div>
               <div class="ability-item"><strong>[RMB / Q] ${cls.skillName}:</strong> ${cls.skillDesc}</div>
+              <div class="ability-item"><strong>[R / 2] ${cls.ultName}:</strong> ${cls.ultDesc}</div>
               <div class="ability-item"><strong>[Space] Dodge Roll:</strong> Evade with invulnerability frames.</div>
             </div>
           </div>
@@ -141,10 +152,11 @@ export class HUDManager {
           <span><span class="kbd">WASD</span> Move</span>
           <span><span class="kbd">Mouse</span> Aim</span>
           <span><span class="kbd">LMB</span> Attack</span>
-          <span><span class="kbd">RMB / Q</span> Active Skill</span>
-          <span><span class="kbd">Space</span> Dodge Roll</span>
+          <span><span class="kbd">RMB / Q</span> Skill</span>
+          <span><span class="kbd">R</span> Ultimate</span>
+          <span><span class="kbd">Space</span> Dodge</span>
           <span><span class="kbd">E</span> Interact</span>
-          <span><span class="kbd">M</span> Mute Audio</span>
+          <span><span class="kbd">ESC</span> Pause</span>
         </div>
       </div>
     `;
@@ -167,9 +179,12 @@ export class HUDManager {
     this.root.innerHTML = `
       <div class="hud">
         <div class="hud-top">
-          <div class="hud-floor-card">
-            <div class="floor-title" id="hud-floor">Floor ${state.floor}</div>
-            <div class="floor-sub" id="hud-stats">Kills: 0 &bull; Gold: 0</div>
+          <div style="display:flex;gap:10px;align-items:flex-start">
+            <div class="hud-floor-card">
+              <div class="floor-title" id="hud-floor">Floor ${state.floor}</div>
+              <div class="floor-sub" id="hud-stats">Kills: 0 &bull; Gold: 0</div>
+            </div>
+            <button id="btn-pause" class="class-tab interactive" style="padding:10px 14px;font-size:12px">ESC Menu</button>
           </div>
 
           <div class="boss-bar-wrap" id="boss-wrap" style="display:none">
@@ -200,6 +215,11 @@ export class HUDManager {
                 <div class="cd-overlay" id="cd-skill" style="display:none"></div>
               </div>
               <div class="skill-slot">
+                <div class="s-key">R / 2</div>
+                <div class="s-name">${cls.ultName}</div>
+                <div class="cd-overlay" id="cd-ult" style="display:none"></div>
+              </div>
+              <div class="skill-slot">
                 <div class="s-key">SPACE</div>
                 <div class="s-name">Dodge Roll</div>
                 <div class="cd-overlay" id="cd-dodge" style="display:none"></div>
@@ -211,6 +231,7 @@ export class HUDManager {
         </div>
       </div>
     `;
+    document.getElementById('btn-pause')?.addEventListener('click', () => this.onTogglePause?.());
   }
 
   private updatePlayingValues(state: HUDState): void {
@@ -232,6 +253,16 @@ export class HUDManager {
         cdSkill.textContent = `${state.skillCd.toFixed(1)}s`;
       } else {
         cdSkill.style.display = 'none';
+      }
+    }
+
+    const cdUlt = document.getElementById('cd-ult');
+    if (cdUlt) {
+      if (state.ultCd > 0.05) {
+        cdUlt.style.display = 'flex';
+        cdUlt.textContent = `${state.ultCd.toFixed(1)}s`;
+      } else {
+        cdUlt.style.display = 'none';
       }
     }
 
@@ -338,6 +369,31 @@ export class HUDManager {
     ctx.beginPath();
     ctx.arc(px, py, 3.6 + scale * 0, 0, Math.PI * 2);
     ctx.fill();
+  }
+
+  private renderPause(state: HUDState): void {
+    this.root.innerHTML = `
+      <div class="modal-backdrop interactive">
+        <div class="modal-title">Paused</div>
+        <div style="font-size:15px;color:var(--muted)">
+          Floor ${state.floor} &bull; ${HERO_CLASSES[state.selectedClass].name} &bull; ${state.kills} Kills
+        </div>
+        <div style="display:flex;flex-direction:column;gap:12px;width:260px">
+          <button class="start-btn" id="btn-resume">Resume</button>
+          <button class="class-tab" id="btn-restart-run" style="padding:12px;font-size:14px">Restart Run</button>
+          <button class="class-tab" id="btn-quit-title" style="padding:12px;font-size:14px;border-color:rgba(225,66,66,0.5);color:#ff8a8a">Quit to Title</button>
+        </div>
+      </div>
+    `;
+    document.getElementById('btn-resume')?.addEventListener('click', () => this.onTogglePause?.());
+    document.getElementById('btn-restart-run')?.addEventListener('click', () => {
+      this.onUISelect?.();
+      this.onRestartRun?.();
+    });
+    document.getElementById('btn-quit-title')?.addEventListener('click', () => {
+      this.onUISelect?.();
+      this.onRestart();
+    });
   }
 
   private renderDeath(state: HUDState): void {

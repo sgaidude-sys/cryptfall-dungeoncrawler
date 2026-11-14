@@ -21,6 +21,9 @@ export interface HeroClassDef {
   skillName: string;
   skillDesc: string;
   skillCooldown: number;
+  ultName: string;
+  ultDesc: string;
+  ultCooldown: number;
   attackClips: string[];
   runClip: string;
   accentHex: string;
@@ -60,7 +63,7 @@ export interface RoomData {
   doors: { n?: boolean; s?: boolean; e?: boolean; w?: boolean };
 }
 
-export type GamePhase = 'loading' | 'title' | 'playing' | 'relic_draft' | 'dead';
+export type GamePhase = 'loading' | 'title' | 'playing' | 'paused' | 'relic_draft' | 'dead';
 
 export interface HUDState {
   phase: GamePhase;
@@ -72,6 +75,8 @@ export interface HUDState {
   maxHp: number;
   skillCd: number;
   skillMaxCd: number;
+  ultCd: number;
+  ultMaxCd: number;
   dodgeCd: number;
   dodgeMaxCd: number;
   relics: RelicId[];
