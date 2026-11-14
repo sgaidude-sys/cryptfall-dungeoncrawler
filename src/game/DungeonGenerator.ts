@@ -275,7 +275,7 @@ export class DungeonFloorBuilder {
       npcId: TownNpcId;
       model: string;
       scale?: number;
-      idleClip: string;
+      idleClip?: string;
       rightWeapon?: string;
       leftWeapon?: string;
       prop?: string;
@@ -288,9 +288,8 @@ export class DungeonFloorBuilder {
     }> = [
       {
         npcId: 'blacksmith',
-        model: 'monsters/Orc.gltf',
-        scale: 0.78,
-        idleClip: 'Idle',
+        model: 'npcs/Male_Peasant.gltf',
+        scale: 1.12,
         prop: 'props_fantasy/Anvil.gltf',
         x: -7.5,
         z: -5.5,
@@ -301,22 +300,20 @@ export class DungeonFloorBuilder {
       },
       {
         npcId: 'kafra',
-        model: 'characters/Ranger.glb',
-        idleClip: 'Idle_A',
-        leftWeapon: 'weapons/pack_bow_golden.glb',
+        model: 'npcs/Female_Peasant.gltf',
+        scale: 1.12,
         prop: 'dungeon/chest_rare.gltf.glb',
         x: 7.5,
         z: -5.5,
         ry: -0.6,
-        tag: '[📦] Vault Keeper Lyra',
+        tag: '[📦] Vault Keeper Pip',
         color: '#38bdf8',
-        prompt: '[E] Vault Keeper Lyra (Monster Sigil Vault)',
+        prompt: '[E] Vault Keeper Pip (Monster Sigil Vault)',
       },
       {
         npcId: 'hypnotist',
-        model: 'characters/Skeleton_Mage.glb',
-        idleClip: 'Idle_A',
-        rightWeapon: 'weapons/Skeleton_Staff.gltf',
+        model: 'npcs/Female_Ranger.gltf',
+        scale: 1.12,
         prop: 'props_fantasy/BookStand.gltf',
         x: -7.5,
         z: 5.5,
@@ -340,10 +337,8 @@ export class DungeonFloorBuilder {
       },
       {
         npcId: 'guildmaster',
-        model: 'characters/Knight.glb',
-        idleClip: 'Idle_A',
-        rightWeapon: 'weapons/pack_sword_golden.glb',
-        leftWeapon: 'weapons/pack_shield_celtic.glb',
+        model: 'npcs/Male_Ranger.gltf',
+        scale: 1.12,
         prop: 'props_fantasy/Banner_1.gltf',
         x: 0,
         z: -8.5,
@@ -363,9 +358,11 @@ export class DungeonFloorBuilder {
       charMesh.rotation.y = n.ry;
       this.group.add(charMesh);
 
-      const npcAnim = new AnimatorHelper(charMesh, this.assets);
-      npcAnim.playLoop(n.idleClip, 0.1);
-      this.npcAnimators.push(npcAnim);
+      if (n.idleClip) {
+        const npcAnim = new AnimatorHelper(charMesh, this.assets);
+        npcAnim.playLoop(n.idleClip, 0.1);
+        this.npcAnimators.push(npcAnim);
+      }
 
       const labelSprite = this.createNpcLabelSprite(n.tag, n.color);
       labelSprite.position.set(n.x, 2.75, n.z);

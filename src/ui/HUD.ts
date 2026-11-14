@@ -792,7 +792,7 @@ export class HUDManager {
         </div>
       `;
     } else if (npc === 'kafra') {
-      title = '📦 Vault Keeper Lyra — Monster Sigils';
+      title = '📦 Vault Keeper Pip — Monster Sigils';
       body = `
         <div style="font-size:13px;color:var(--muted)">Equipped Sigil: <strong style="color:#7dd3fc">${state.equippedCard?.name ?? 'None'}</strong></div>
         <div style="display:grid;grid-template-columns:repeat(2,minmax(200px,240px));gap:12px">

@@ -86,6 +86,11 @@ export class AssetManager {
       'props_fantasy/CandleStick_Triple.gltf',
       'props_fantasy/BookStand.gltf',
       'props_fantasy/Potion_1.gltf',
+      // Modular Fantasy Outfit NPCs
+      'npcs/Female_Peasant.gltf',
+      'npcs/Female_Ranger.gltf',
+      'npcs/Male_Peasant.gltf',
+      'npcs/Male_Ranger.gltf',
     ];
 
     const animPaths = [
@@ -166,13 +171,14 @@ export class AssetManager {
     const isDungeon = assetPath.startsWith('dungeon/');
     const isMonster = assetPath.startsWith('monsters/');
     const isFantasyProp = assetPath.startsWith('props_fantasy/');
+    const isFantasyNpc = assetPath.startsWith('npcs/');
     const isPackWeapon = assetPath.startsWith('weapons/pack_');
     root.traverse((obj) => {
       if (!(obj instanceof THREE.Mesh)) return;
       obj.castShadow = true;
       obj.receiveShadow = true;
 
-      if (isMonster || isFantasyProp) return;
+      if (isMonster || isFantasyProp || isFantasyNpc) return;
       if (isPackWeapon) {
         const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
         for (const m of mats) {
