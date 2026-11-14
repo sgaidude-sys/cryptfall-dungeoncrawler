@@ -38,6 +38,9 @@ export interface Enemy {
   dead: boolean;
   deathTimer: number;
   attackTarget: THREE.Vector3;
+  baseScale: number;
+  recoilTilt: number;
+  squash: number;
 }
 
 export class EnemyManager {
@@ -176,6 +179,9 @@ export class EnemyManager {
       dead: false,
       deathTimer: 0,
       attackTarget: new THREE.Vector3(),
+      baseScale: cfg.s,
+      recoilTilt: 0,
+      squash: 0,
     };
     this.enemies.push(enemy);
     return enemy;
@@ -187,8 +193,10 @@ export class EnemyManager {
     this.vfx.spawnDamageNumber(enemy.pos, amount, isCrit ? 'crit' : 'normal');
     this.vfx.spawnBurst(enemy.pos.clone().add(new THREE.Vector3(0, 1, 0)), isCrit ? 0xffd54f : 0xff6b6b, isCrit ? 12 : 6, 4.5);
 
-    const kb = enemy.kind === 'boss' ? 1.8 : 4.5;
+    const kb = enemy.kind === 'boss' ? 3.2 : isCrit ? 9.5 : 6.8;
     enemy.vel.addScaledVector(knockDir, kb);
+    enemy.recoilTilt = isCrit ? -0.45 : -0.28;
+    enemy.squash = isCrit ? 0.28 : 0.16;
 
     if (stunSec > 0) {
       enemy.stunTimer = Math.max(enemy.stunTimer, stunSec);
@@ -240,13 +248,27 @@ export class EnemyManager {
         continue;
       }
 
-      // Apply knockback velocity
+      // Apply knockback velocity & impact spring physics
       if (e.vel.lengthSq() > 0.01) {
         const nx = e.pos.x + e.vel.x * dt;
         const nz = e.pos.z + e.vel.z * dt;
         if (dungeon.isWalkable(nx, e.pos.z, e.radius)) e.pos.x = nx;
         if (dungeon.isWalkable(e.pos.x, nz, e.radius)) e.pos.z = nz;
-        e.vel.multiplyScalar(Math.pow(0.01, dt));
+        e.vel.multiplyScalar(Math.pow(0.015, dt));
+      }
+
+      if (Math.abs(e.recoilTilt) > 0.005 || Math.abs(e.squash) > 0.005) {
+        e.recoilTilt *= Math.pow(0.001, dt);
+        e.squash *= Math.pow(0.001, dt);
+        e.mesh.rotation.x = e.recoilTilt;
+        e.mesh.scale.set(
+          e.baseScale * (1 + e.squash * 0.7),
+          e.baseScale * (1 - e.squash),
+          e.baseScale * (1 + e.squash * 0.7)
+        );
+      } else {
+        e.mesh.rotation.x = 0;
+        e.mesh.scale.setScalar(e.baseScale);
       }
 
       if (e.chillTimer > 0) e.chillTimer -= dt;
@@ -395,10 +417,11 @@ export class EnemyManager {
         );
       }
     } else {
-      e.anim.playOneShot('Melee_1H_Attack_Chop', 0.06, 1.3, 0.35);
+      e.anim.playOneShot('Melee_1H_Attack_Chop', 0.06, 1.35, 0.35);
+      e.vel.addScaledVector(dir, 5.2);
       this.sound.playSwordClang(0.65);
       this.vfx.spawnSlashArc(e.pos, Math.atan2(dir.x, dir.z), e.range, 0xff4444);
-      if (e.pos.distanceTo(playerPos) <= e.range + 0.35) {
+      if (e.pos.distanceTo(playerPos) <= e.range + 0.4) {
         onPlayerHit(e.damage, dir);
       }
     }

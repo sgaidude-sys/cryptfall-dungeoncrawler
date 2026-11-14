@@ -53,6 +53,7 @@ export class DungeonFloorBuilder {
   private torches: TorchLight[] = [];
   private doorGates: THREE.Object3D[] = [];
   public gatesLocked = false;
+  public lockedRoom: RoomData | null = null;
   private gateLerp = 0;
 
   constructor(private assets: AssetManager) {}
@@ -208,16 +209,22 @@ export class DungeonFloorBuilder {
     // Perimeter Walls + Doorways
     const placeWallSeg = (wx: number, wz: number, rotY: number, isDoor: boolean) => {
       if (isDoor) {
-        const arch = this.assets.cloneProp('dungeon/wall_gate.gltf.glb');
+        const arch = this.assets.cloneProp('dungeon/wall_door.gltf.glb');
         arch.position.set(wx, -0.4, wz);
         arch.rotation.y = rotY;
         this.group.add(arch);
 
+        // Hinged iron gate inside the doorway: swings open 105 deg when unlocked, closes to 0 when locked
+        const hinge = new THREE.Group();
+        hinge.position.set(wx, 1.08, wz);
+        hinge.rotation.y = rotY;
+        const gatePivot = new THREE.Group();
+        gatePivot.position.set(-1.0, 0, 0);
         const gate = this.assets.cloneProp('dungeon/door_gate.gltf.glb');
-        gate.position.set(wx, -3.2, wz); // starts open (retracted down)
-        gate.rotation.y = rotY;
-        this.group.add(gate);
-        this.doorGates.push(gate);
+        gatePivot.add(gate);
+        hinge.add(gatePivot);
+        this.group.add(hinge);
+        this.doorGates.push(gatePivot);
       } else {
         const wallName = Math.random() < 0.16 ? 'dungeon/wall_broken.gltf.glb' : 'dungeon/wall.gltf.glb';
         const wall = this.assets.cloneProp(wallName);
@@ -423,6 +430,16 @@ export class DungeonFloorBuilder {
   }
 
   public isWalkable(x: number, z: number, radius = 0.45): boolean {
+    if (this.gatesLocked && this.lockedRoom) {
+      const hw = (this.lockedRoom.widthTiles * TILE) / 2;
+      const hd = (this.lockedRoom.depthTiles * TILE) / 2;
+      const minX = this.lockedRoom.worldX - hw + 0.65 + radius;
+      const maxX = this.lockedRoom.worldX + hw - 0.65 - radius;
+      const minZ = this.lockedRoom.worldZ - hd + 0.65 + radius;
+      const maxZ = this.lockedRoom.worldZ + hd - 0.65 - radius;
+      if (x < minX || x > maxX || z < minZ || z > maxZ) return false;
+    }
+
     let inside = false;
     for (const r of this.walkRects) {
       if (x >= r.minX + radius && x <= r.maxX - radius && z >= r.minZ + radius && z <= r.maxZ - radius) {
@@ -457,12 +474,12 @@ export class DungeonFloorBuilder {
       t.light.intensity = t.baseIntensity * (1 + f);
     }
 
-    // Animate door gates
-    const target = this.gatesLocked ? 1 : 0;
+    // Animate swinging door gates (0 = closed, 1 = swung open 105 deg)
+    const target = this.gatesLocked ? 0 : 1;
     this.gateLerp += (target - this.gateLerp) * Math.min(1, dt * 8);
-    const gateY = -3.2 + this.gateLerp * 2.8;
+    const openAngle = this.gateLerp * (Math.PI * 0.58);
     for (const g of this.doorGates) {
-      g.position.y = gateY;
+      g.rotation.y = openAngle;
     }
 
     // Animate spike traps (cycle every 2.8s)
@@ -493,6 +510,7 @@ export class DungeonFloorBuilder {
     this.torches = [];
     this.doorGates = [];
     this.gatesLocked = false;
-    this.gateLerp = 0;
+    this.lockedRoom = null;
+    this.gateLerp = 1;
   }
 }

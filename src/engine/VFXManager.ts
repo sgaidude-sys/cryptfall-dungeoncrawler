@@ -80,23 +80,25 @@ export class VFXManager {
     return this.shakeOffset;
   }
 
-  public spawnSlashArc(pos: THREE.Vector3, yaw: number, radius: number, colorHex: number, fullCircle = false): void {
-    const arcAngle = fullCircle ? Math.PI * 1.9 : Math.PI * 0.85;
-    const geo = new THREE.RingGeometry(radius * 0.55, radius, 22, 1, -arcAngle / 2, arcAngle);
+  public spawnSlashArc(pos: THREE.Vector3, yaw: number, radius: number, colorHex: number, fullCircle = false, tilt = 0.28): void {
+    const arcAngle = fullCircle ? Math.PI * 1.9 : Math.PI * 0.95;
+    const geo = new THREE.RingGeometry(radius * 0.48, radius, 24, 1, -arcAngle / 2, arcAngle);
     geo.rotateX(-Math.PI / 2);
     const mat = new THREE.MeshBasicMaterial({
       color: colorHex,
       transparent: true,
-      opacity: 0.9,
+      opacity: 0.95,
       side: THREE.DoubleSide,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
     const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(pos.x, pos.y + 1.05, pos.z);
-    mesh.rotation.y = yaw - Math.PI / 2;
+    mesh.position.set(pos.x, pos.y + 1.1, pos.z);
+    mesh.rotation.order = 'YXZ';
+    mesh.rotation.y = yaw - Math.PI / 2 - 0.35;
+    mesh.rotation.x = fullCircle ? 0.05 : tilt;
     this.scene.add(mesh);
-    this.slashes.push({ mesh, life: 0.16, maxLife: 0.16, startYaw: mesh.rotation.y });
+    this.slashes.push({ mesh, life: 0.14, maxLife: 0.14, startYaw: mesh.rotation.y });
   }
 
   public spawnRing(pos: THREE.Vector3, maxScale: number, colorHex: number, duration = 0.35): void {
@@ -257,9 +259,9 @@ export class VFXManager {
         continue;
       }
       const t = 1 - s.life / s.maxLife;
-      s.mesh.rotation.y = s.startYaw + t * 0.65;
-      s.mesh.scale.setScalar(1 + t * 0.25);
-      (s.mesh.material as THREE.MeshBasicMaterial).opacity = (1 - t) * 0.9;
+      s.mesh.rotation.y = s.startYaw + t * 1.05;
+      s.mesh.scale.setScalar(0.92 + t * 0.28);
+      (s.mesh.material as THREE.MeshBasicMaterial).opacity = (1 - t) * 0.95;
     }
 
     // Rings

@@ -295,6 +295,7 @@ export class GameEngine {
         if (!room.cleared && this.activeRoom !== room && (room.type === 'combat' || room.type === 'boss' || room.type === 'trap')) {
           this.activeRoom = room;
           this.dungeon.gatesLocked = true;
+          this.dungeon.lockedRoom = room;
           this.enemies.spawnWaveForRoom(room, this.floor);
           this.sound.setCombatIntensity(room.type === 'boss' ? 1.0 : 0.75);
           if (room.type === 'boss') this.showBanner('Boss Chamber — Dread Bone Colossus');
@@ -305,6 +306,7 @@ export class GameEngine {
       if (this.activeRoom && !this.activeRoom.cleared && this.enemies.enemies.every((e) => e.dead)) {
         this.activeRoom.cleared = true;
         this.dungeon.gatesLocked = false;
+        this.dungeon.lockedRoom = null;
         this.sound.setCombatIntensity(0.15);
         this.sound.playChestChime();
 

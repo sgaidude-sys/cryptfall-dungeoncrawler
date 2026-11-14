@@ -42,6 +42,8 @@ export class PlayerController {
   private dodgeTimer = 0;
   private dodgeDir = new THREE.Vector3();
   private dodgeHitIds = new Set<number>();
+  private impulseVel = new THREE.Vector3();
+  private pendingStrike: { timer: number; yaw: number; combo: number } | null = null;
 
   private attackComboIdx = 0;
   private hitCounter = 0;
@@ -130,6 +132,22 @@ export class PlayerController {
     if (this.skillCd > 0) this.skillCd = Math.max(0, this.skillCd - dt);
     if (this.dodgeCd > 0) this.dodgeCd = Math.max(0, this.dodgeCd - dt);
     if (this.iFrames > 0) this.iFrames = Math.max(0, this.iFrames - dt);
+
+    // Apply physical lunge / knockback impulse
+    if (this.impulseVel.lengthSq() > 0.01) {
+      this.tryMove(this.impulseVel.x * dt, this.impulseVel.z * dt, dungeon);
+      this.impulseVel.multiplyScalar(Math.pow(0.008, dt));
+    }
+
+    // Resolve synced weapon swing impact
+    if (this.pendingStrike) {
+      this.pendingStrike.timer -= dt;
+      if (this.pendingStrike.timer <= 0) {
+        const s = this.pendingStrike;
+        this.pendingStrike = null;
+        this.resolvePrimaryImpact(s.yaw, s.combo, enemies);
+      }
+    }
 
     // Aim direction
     const dxAim = aimWorld.x - this.pos.x;
@@ -248,21 +266,33 @@ export class PlayerController {
     if (dungeon.isWalkable(this.pos.x, this.pos.z + dz, 0.48)) this.pos.z += dz;
   }
 
-  private usePrimaryAttack(enemies: EnemyManager): void {
+  private usePrimaryAttack(_enemies: EnemyManager): void {
     const atkSpdMult = this.hasRelic('berserker_blood') ? 1.25 : 1.0;
     this.attackCd = this.def.attackCooldown / atkSpdMult;
     this.mesh.rotation.y = this.aimYaw;
 
-    const clip = this.def.attackClips[this.attackComboIdx % this.def.attackClips.length];
-    this.attackComboIdx++;
+    const combo = this.attackComboIdx++;
+    const clip = this.def.attackClips[combo % this.def.attackClips.length];
     this.anim.playOneShot(clip, 0.05, 1.35 * atkSpdMult, Math.min(0.28, this.attackCd * 0.85));
 
     const forward = new THREE.Vector3(Math.sin(this.aimYaw), 0, Math.cos(this.aimYaw));
+    if (!this.def.isRanged) {
+      // Physical forward step/lunge into the swing
+      this.impulseVel.addScaledVector(forward, this.def.id === 'barbarian' ? 6.2 : 4.8);
+    }
+
+    const windup = this.def.isRanged ? 0.07 : this.def.id === 'barbarian' ? 0.14 : this.def.id === 'rogue' ? 0.06 : 0.10;
+    this.pendingStrike = { timer: windup / atkSpdMult, yaw: this.aimYaw, combo };
+  }
+
+  private resolvePrimaryImpact(yaw: number, combo: number, enemies: EnemyManager): void {
+    const forward = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
     const { dmg, isCrit } = this.getDamageStat();
 
     if (this.def.isRanged) {
       if (this.def.id === 'ranger') this.sound.playBowTwang();
       else this.sound.playArcaneBlast();
+      this.impulseVel.addScaledVector(forward, -1.6);
 
       const spawnPos = this.pos.clone().add(new THREE.Vector3(forward.x * 0.7, 1.15, forward.z * 0.7));
       this.spawnProjectile(
@@ -281,7 +311,8 @@ export class PlayerController {
 
       const reach = this.def.range + (this.hasRelic('ricochet') ? 0.7 : 0);
       const isFullCircle = this.def.id === 'barbarian';
-      this.vfx.spawnSlashArc(this.pos, this.aimYaw, reach, parseInt(this.def.accentHex.slice(1), 16), isFullCircle);
+      const tilt = combo % 2 === 0 ? 0.32 : -0.32;
+      this.vfx.spawnSlashArc(this.pos, yaw, reach, parseInt(this.def.accentHex.slice(1), 16), isFullCircle, tilt);
 
       let hitAny = false;
       for (const e of [...enemies.enemies]) {
@@ -296,9 +327,9 @@ export class PlayerController {
           }
         }
       }
-      if (hitAny && (isCrit || this.def.id === 'barbarian')) {
-        this.vfx.triggerHitStop(0.04);
-        this.vfx.addCameraShake(forward, isCrit ? 0.22 : 0.14);
+      if (hitAny) {
+        this.vfx.triggerHitStop(isCrit || this.def.id === 'barbarian' ? 0.048 : 0.024);
+        this.vfx.addCameraShake(forward, isCrit ? 0.26 : this.def.id === 'barbarian' ? 0.18 : 0.10);
       }
     }
   }
@@ -511,8 +542,9 @@ export class PlayerController {
     if (this.iFrames > 0 || this.hp <= 0) return;
     this.hp = Math.max(0, this.hp - amount);
     this.iFrames = 0.45;
+    this.impulseVel.addScaledVector(dir, 6.5);
     this.sound.playPlayerHit();
-    this.vfx.addCameraShake(dir, 0.3);
+    this.vfx.addCameraShake(dir, 0.34);
     this.vfx.spawnDamageNumber(this.pos, amount, 'player-hit');
     this.anim.playOneShot('Hit_A', 0.05, 1.4, 0.22);
     if (this.hp <= 0) {
