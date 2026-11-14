@@ -425,7 +425,7 @@ export class HUDManager {
     }
 
     const statsEl = document.getElementById('hud-stats');
-    if (statsEl) statsEl.textContent = `Lv.${state.level} (${state.xp}/${state.xpToNext} XP)  •  Kills: ${state.kills}  •  Zeny: ${state.gold}`;
+    if (statsEl) statsEl.textContent = `Lv.${state.level} (${state.xp}/${state.xpToNext} XP)  •  Kills: ${state.kills}  •  Gold: ${state.gold}g`;
 
     const statPtsEl = document.getElementById('hud-stat-pts');
     if (statPtsEl) statPtsEl.textContent = String(state.statPoints);
@@ -769,32 +769,32 @@ export class HUDManager {
     let title = 'Oakhaven NPC';
     let body = '';
     if (npc === 'blacksmith') {
-      title = '⚒ Blacksmith — Equipment Refining';
+      title = '⚒ Runesmith Torgar — Relic Refining';
       const wCost = (state.weaponRefine + 1) * 60;
       const aCost = (state.armorRefine + 1) * 50;
       body = `
-        <div style="font-size:13px;color:var(--muted)">Your Zeny: <strong style="color:#fde047">${state.gold}z</strong></div>
+        <div style="font-size:13px;color:var(--muted)">Your Gold: <strong style="color:#fde047">${state.gold}g</strong></div>
         <div style="display:flex;gap:14px;flex-wrap:wrap;justify-content:center">
           <div style="background:rgba(16,14,24,0.92);border:1px solid rgba(249,115,22,0.45);border-radius:12px;padding:16px;width:240px">
             <strong style="color:#fdba74">Weapon Refine (+${state.weaponRefine}/+10)</strong>
             <p style="font-size:12px;color:var(--muted);margin:8px 0">+5 ATK & +5 MATK per level. Glowing aura at +7 and +10!</p>
             <button class="start-btn" id="btn-ref-w" ${state.weaponRefine >= 10 || state.gold < wCost ? 'disabled' : ''} style="width:100%;padding:9px;font-size:12px">
-              ${state.weaponRefine >= 10 ? 'MAX +10' : `Refine (${wCost}z)`}
+              ${state.weaponRefine >= 10 ? 'MAX +10' : `Refine (${wCost}g)`}
             </button>
           </div>
           <div style="background:rgba(16,14,24,0.92);border:1px solid rgba(56,189,248,0.45);border-radius:12px;padding:16px;width:240px">
             <strong style="color:#7dd3fc">Armor Refine (+${state.armorRefine}/+10)</strong>
             <p style="font-size:12px;color:var(--muted);margin:8px 0">+4 Hard DEF per level for near-zero VIT tanking!</p>
             <button class="start-btn" id="btn-ref-a" ${state.armorRefine >= 10 || state.gold < aCost ? 'disabled' : ''} style="width:100%;padding:9px;font-size:12px">
-              ${state.armorRefine >= 10 ? 'MAX +10' : `Refine (${aCost}z)`}
+              ${state.armorRefine >= 10 ? 'MAX +10' : `Refine (${aCost}g)`}
             </button>
           </div>
         </div>
       `;
     } else if (npc === 'kafra') {
-      title = '📦 Kafra Storage — Monster Cards';
+      title = '📦 Vault Keeper Lyra — Monster Sigils';
       body = `
-        <div style="font-size:13px;color:var(--muted)">Equipped Card: <strong style="color:#7dd3fc">${state.equippedCard?.name ?? 'None'}</strong></div>
+        <div style="font-size:13px;color:var(--muted)">Equipped Sigil: <strong style="color:#7dd3fc">${state.equippedCard?.name ?? 'None'}</strong></div>
         <div style="display:grid;grid-template-columns:repeat(2,minmax(200px,240px));gap:12px">
           ${state.kafraStorage
             .map((c) => {
@@ -811,21 +811,21 @@ export class HUDManager {
         </div>
       `;
     } else if (npc === 'hypnotist') {
-      title = '✦ Hypnotist — Stat & Skill Reset';
+      title = '✦ Soul Weaver Vaelen — Build Reset';
       body = `
-        <p style="font-size:13px;color:var(--muted);max-width:440px;text-align:center">Free build resets in Oakhaven Town so you can test DEX Instant-Cast, VIT Tanking, or AGI/LUK Crit builds!</p>
+        <p style="font-size:13px;color:var(--muted);max-width:440px;text-align:center">Unbind your soul in Oakhaven Town to freely test DEX Instant-Cast, VIT Tanking, or AGI/LUK Crit builds!</p>
         <div style="display:flex;gap:12px">
           <button class="start-btn" id="btn-reset-stats" style="padding:10px 18px;font-size:13px">Reset Base Stats</button>
           <button class="start-btn" id="btn-reset-skills" style="padding:10px 18px;font-size:13px">Reset Skills</button>
         </div>
       `;
     } else if (npc === 'alchemist') {
-      title = '⚗ Alchemist — Potion Shop';
+      title = '⚗ Apothecary Myco — Elixir Shop';
       body = `
-        <div style="font-size:13px;color:var(--muted)">Your Zeny: <strong style="color:#fde047">${state.gold}z</strong></div>
+        <div style="font-size:13px;color:var(--muted)">Your Gold: <strong style="color:#fde047">${state.gold}g</strong></div>
         <div style="display:flex;gap:14px">
-          <button class="start-btn" id="btn-buy-red" ${state.gold < 25 ? 'disabled' : ''} style="padding:12px 18px;font-size:13px">Buy Red Potion (25z) [Owned: ${state.redPotions}]</button>
-          <button class="start-btn" id="btn-buy-blue" ${state.gold < 40 ? 'disabled' : ''} style="padding:12px 18px;font-size:13px">Buy Blue Potion (40z) [Owned: ${state.bluePotions}]</button>
+          <button class="start-btn" id="btn-buy-red" ${state.gold < 25 ? 'disabled' : ''} style="padding:12px 18px;font-size:13px">Buy Crimson Elixir (25g) [Owned: ${state.redPotions}]</button>
+          <button class="start-btn" id="btn-buy-blue" ${state.gold < 40 ? 'disabled' : ''} style="padding:12px 18px;font-size:13px">Buy Azure Elixir (40g) [Owned: ${state.bluePotions}]</button>
         </div>
       `;
     }

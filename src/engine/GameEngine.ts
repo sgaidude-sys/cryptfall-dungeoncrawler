@@ -176,13 +176,13 @@ export class GameEngine {
         this.player.roStats.resetStats();
         this.player.getDerived();
         this.sound.playUIPopup();
-        this.showBanner('Stats Reset by Hypnotist!');
+        this.showBanner('Stats Reset by Soul Weaver Vaelen!');
       },
       onResetSkills: () => {
         if (!this.player) return;
         this.player.roSkills.resetSkills();
         this.sound.playUIPopup();
-        this.showBanner('Skills Reset by Hypnotist!');
+        this.showBanner('Skills Reset by Soul Weaver Vaelen!');
       },
       onBuyPotion: (kind: 'red' | 'blue') => {
         if (!this.player) return;
@@ -320,7 +320,7 @@ export class GameEngine {
       startLook: new THREE.Vector3(0, 1.8, -3),
       endLook: new THREE.Vector3(0, 0.8, 0),
       title: 'Oakhaven Town Hub',
-      subtitle: 'Visit Blacksmith, Kafra, Alchemist — or speak to the Guild Master to enter the Crypt.',
+      subtitle: 'Visit Runesmith Torgar, Vault Keeper Lyra, Apothecary Myco — or speak to Warden Aldric.',
       onComplete: () => this.showBanner('Oakhaven Town — Press [U] Stats | [K] Skills'),
     });
   }

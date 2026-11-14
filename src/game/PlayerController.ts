@@ -40,10 +40,10 @@ export class PlayerController {
   public redPotions = 5;
   public bluePotions = 3;
   public kafraStorage: KafraItem[] = [
-    { id: 'poring_card', name: 'Poring Card', desc: '+5 LUK (Crit & Perfect Dodge)', icon: '🃏', bonusStat: 'luk', bonusAmt: 5 },
-    { id: 'peco_card', name: 'Peco Peco Card', desc: '+10 VIT (Tank Soft DEF & HP)', icon: '🛡️', bonusStat: 'vit', bonusAmt: 10 },
-    { id: 'andre_card', name: 'Andre Card', desc: '+8 STR (Physical ATK)', icon: '⚔️', bonusStat: 'str', bonusAmt: 8 },
-    { id: 'elder_willow_card', name: 'Elder Willow Card', desc: '+8 INT (MATK & Max SP)', icon: '🔮', bonusStat: 'int', bonusAmt: 8 },
+    { id: 'slime_sigil', name: 'Ooze Core Sigil', desc: '+5 LUK (Crit & Lucky Dodge)', icon: '🧪', bonusStat: 'luk', bonusAmt: 5 },
+    { id: 'colossus_sigil', name: 'Bone Colossus Sigil', desc: '+10 VIT (Tank Soft DEF & HP)', icon: '🛡️', bonusStat: 'vit', bonusAmt: 10 },
+    { id: 'orc_sigil', name: 'Orc Warband Sigil', desc: '+8 STR (Physical ATK)', icon: '⚔️', bonusStat: 'str', bonusAmt: 8 },
+    { id: 'lich_sigil', name: 'Ossuary Lich Sigil', desc: '+8 INT (MATK & Max SP)', icon: '🔮', bonusStat: 'int', bonusAmt: 8 },
   ];
   public equippedCard: KafraItem | null = null;
   public relics: RelicId[] = [];

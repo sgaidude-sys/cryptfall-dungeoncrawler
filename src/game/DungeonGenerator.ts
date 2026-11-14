@@ -274,6 +274,8 @@ export class DungeonFloorBuilder {
     const npcs: Array<{
       npcId: TownNpcId;
       model: string;
+      scale?: number;
+      idleClip: string;
       rightWeapon?: string;
       leftWeapon?: string;
       prop?: string;
@@ -286,69 +288,75 @@ export class DungeonFloorBuilder {
     }> = [
       {
         npcId: 'blacksmith',
-        model: 'characters/Barbarian.glb',
-        rightWeapon: 'weapons/pack_hammer_double.glb',
+        model: 'monsters/Orc.gltf',
+        scale: 0.78,
+        idleClip: 'Idle',
         prop: 'props_fantasy/Anvil.gltf',
         x: -7.5,
         z: -5.5,
         ry: 0.6,
-        tag: '[⚒] Blacksmith (Refine)',
+        tag: '[⚒] Runesmith Torgar',
         color: '#f97316',
-        prompt: '[E] Talk to Blacksmith (+1 to +10 Refine)',
+        prompt: '[E] Runesmith Torgar (Weapon & Armor Refine)',
       },
       {
         npcId: 'kafra',
         model: 'characters/Ranger.glb',
+        idleClip: 'Idle_A',
         leftWeapon: 'weapons/pack_bow_golden.glb',
         prop: 'dungeon/chest_rare.gltf.glb',
         x: 7.5,
         z: -5.5,
         ry: -0.6,
-        tag: '[📦] Kafra Storage',
+        tag: '[📦] Vault Keeper Lyra',
         color: '#38bdf8',
-        prompt: '[E] Open Kafra Card Storage',
+        prompt: '[E] Vault Keeper Lyra (Monster Sigil Vault)',
       },
       {
         npcId: 'hypnotist',
-        model: 'characters/Mage.glb',
-        rightWeapon: 'weapons/staff.gltf',
+        model: 'characters/Skeleton_Mage.glb',
+        idleClip: 'Idle_A',
+        rightWeapon: 'weapons/Skeleton_Staff.gltf',
         prop: 'props_fantasy/BookStand.gltf',
         x: -7.5,
         z: 5.5,
         ry: 2.5,
-        tag: '[✦] Hypnotist (Reset)',
+        tag: '[✦] Soul Weaver Vaelen',
         color: '#c084fc',
-        prompt: '[E] Talk to Hypnotist (Stat/Skill Reset)',
+        prompt: '[E] Soul Weaver Vaelen (Stat & Skill Reset)',
       },
       {
         npcId: 'alchemist',
-        model: 'characters/Rogue_Hooded.glb',
-        rightWeapon: 'weapons/pack_dagger.glb',
+        model: 'monsters/MushroomKing.gltf',
+        scale: 0.78,
+        idleClip: 'Idle',
         prop: 'props_fantasy/Cauldron.gltf',
         x: 7.5,
         z: 5.5,
         ry: -2.5,
-        tag: '[⚗] Alchemist (Potions)',
+        tag: '[⚗] Apothecary Myco',
         color: '#34d399',
-        prompt: '[E] Buy Red/Blue Potions',
+        prompt: '[E] Apothecary Myco (Crimson & Azure Elixirs)',
       },
       {
         npcId: 'guildmaster',
         model: 'characters/Knight.glb',
+        idleClip: 'Idle_A',
         rightWeapon: 'weapons/pack_sword_golden.glb',
         leftWeapon: 'weapons/pack_shield_celtic.glb',
         prop: 'props_fantasy/Banner_1.gltf',
         x: 0,
         z: -8.5,
         ry: 0,
-        tag: '[!] Enter Dungeon',
+        tag: '[!] Warden Aldric',
         color: '#facc15',
-        prompt: '[E] Enter Sunken Crypt (Floor 1)',
+        prompt: '[E] Warden Aldric — Enter Sunken Crypt (Floor 1)',
       },
     ];
 
     for (const n of npcs) {
       const charMesh = this.assets.cloneCharacter(n.model);
+      if (n.scale) charMesh.scale.setScalar(n.scale);
       if (n.rightWeapon) this.assets.attachToHand(charMesh, n.rightWeapon, 'right');
       if (n.leftWeapon) this.assets.attachToHand(charMesh, n.leftWeapon, 'left');
       charMesh.position.set(n.x, 0, n.z);
@@ -356,7 +364,7 @@ export class DungeonFloorBuilder {
       this.group.add(charMesh);
 
       const npcAnim = new AnimatorHelper(charMesh, this.assets);
-      npcAnim.playLoop('Idle_A', 0.1);
+      npcAnim.playLoop(n.idleClip, 0.1);
       this.npcAnimators.push(npcAnim);
 
       const labelSprite = this.createNpcLabelSprite(n.tag, n.color);
