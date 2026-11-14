@@ -329,8 +329,8 @@ export class DungeonFloorBuilder {
 
     this.walkRects.push(
       axis === 'x'
-        ? { minX: startEdge - 1.0, maxX: endEdge + 1.0, minZ: fixedCoord - 1.45, maxZ: fixedCoord + 1.45 }
-        : { minX: fixedCoord - 1.45, maxX: fixedCoord + 1.45, minZ: startEdge - 1.0, maxZ: endEdge + 1.0 }
+        ? { minX: startEdge - 2.5, maxX: endEdge + 2.5, minZ: fixedCoord - 1.5, maxZ: fixedCoord + 1.5 }
+        : { minX: fixedCoord - 1.5, maxX: fixedCoord + 1.5, minZ: startEdge - 2.5, maxZ: endEdge + 2.5 }
     );
 
     for (let i = 0; i < steps; i++) {
