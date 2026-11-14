@@ -56,7 +56,6 @@ export class SoundEngine {
       'ui_hover.mp3', 'ui_select.mp3', 'ui_popup.mp3',
       'step1.mp3', 'step2.mp3',
       'fire_burst.wav', 'heavy_impact.wav', 'ice_nova.wav', 'cinematic_whoosh.mp3',
-      'voice_atk1.wav', 'voice_atk2.wav', 'voice_hit1.wav', 'voice_hit2.wav',
     ];
     for (const f of files) {
       try {
@@ -91,7 +90,27 @@ export class SoundEngine {
   public playUIPopup(): void { this.playBuffer('ui_popup.mp3', 0.38, 0.98, 1.02); }
   public playIceNova(): void { this.playBuffer('ice_nova.wav', 0.42, 0.95, 1.05); }
   public playBattleCry(): void {
-    if (Math.random() < 0.65) this.playBuffer(Math.random() < 0.5 ? 'voice_atk1.wav' : 'voice_atk2.wav', 0.45, 0.94, 1.06);
+    if (!this.ctx || !this.masterGain || this.muted || Math.random() > 0.6) return;
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+    const pitch = 0.92 + Math.random() * 0.16;
+    const osc = ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(118 * pitch, now);
+    osc.frequency.exponentialRampToValueAtTime(82 * pitch, now + 0.18);
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.value = 420 * pitch;
+    filter.Q.value = 2.2;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.001, now);
+    g.gain.linearRampToValueAtTime(0.18, now + 0.03);
+    g.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+    osc.connect(filter);
+    filter.connect(g);
+    g.connect(this.masterGain);
+    osc.start(now);
+    osc.stop(now + 0.23);
   }
 
   public setCombatIntensity(target: number): void {
@@ -368,7 +387,6 @@ export class SoundEngine {
   public playPlayerHit(): void {
     if (!this.ctx || !this.masterGain) return;
     this.playAxeThud(0.85);
-    this.playBuffer(Math.random() < 0.5 ? 'voice_hit1.wav' : 'voice_hit2.wav', 0.42, 0.94, 1.05);
   }
 
   public playExplosion(): void {

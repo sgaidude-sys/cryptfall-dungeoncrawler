@@ -33,7 +33,7 @@ export class AnimatorHelper {
     next.setLoop(THREE.LoopRepeat, Infinity);
     next.play();
     if (this.currentName && this.actions.has(this.currentName)) {
-      this.actions.get(this.currentName)!.crossFadeTo(next, fade, true);
+      this.actions.get(this.currentName)!.crossFadeTo(next, fade, false);
     }
     this.currentName = clipName;
   }
@@ -46,10 +46,10 @@ export class AnimatorHelper {
     next.clampWhenFinished = true;
     next.play();
     if (this.currentName && this.currentName !== clipName && this.actions.has(this.currentName)) {
-      this.actions.get(this.currentName)!.crossFadeTo(next, fade, true);
+      this.actions.get(this.currentName)!.crossFadeTo(next, fade, false);
     }
     this.currentName = clipName;
-    this.oneshotTimer = lockDuration ?? (next.getClip().duration / timeScale) * 0.72;
+    this.oneshotTimer = lockDuration ?? (next.getClip().duration / timeScale) * 0.85;
   }
 
   public update(dt: number): void {
