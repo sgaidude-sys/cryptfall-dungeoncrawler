@@ -1,0 +1,321 @@
+import * as THREE from 'three';
+
+interface Particle {
+  mesh: THREE.Mesh;
+  vel: THREE.Vector3;
+  life: number;
+  maxLife: number;
+  gravity: number;
+  spin: THREE.Vector3;
+}
+
+interface SlashArc {
+  mesh: THREE.Mesh;
+  life: number;
+  maxLife: number;
+  startYaw: number;
+}
+
+interface RingEffect {
+  mesh: THREE.Mesh;
+  life: number;
+  maxLife: number;
+  maxScale: number;
+}
+
+interface BeamEffect {
+  line: THREE.Line;
+  life: number;
+  maxLife: number;
+}
+
+interface FloatingText {
+  el: HTMLDivElement;
+  worldPos: THREE.Vector3;
+  life: number;
+  maxLife: number;
+  vy: number;
+}
+
+export class VFXManager {
+  private particles: Particle[] = [];
+  private slashes: SlashArc[] = [];
+  private rings: RingEffect[] = [];
+  private beams: BeamEffect[] = [];
+  private texts: FloatingText[] = [];
+
+  private hitStopTimer = 0;
+  private shakeOffset = new THREE.Vector3();
+  private shakeVel = new THREE.Vector3();
+  private shakeIntensity = 0;
+
+  private boxGeo = new THREE.BoxGeometry(0.18, 0.12, 0.28);
+  private sparkGeo = new THREE.OctahedronGeometry(0.12, 0);
+  private ringGeo = new THREE.RingGeometry(0.65, 1.0, 28);
+  private damageLayer: HTMLElement;
+
+  constructor(private scene: THREE.Scene) {
+    this.damageLayer = document.getElementById('damage-layer')!;
+    this.ringGeo.rotateX(-Math.PI / 2);
+  }
+
+  public triggerHitStop(seconds = 0.04): void {
+    this.hitStopTimer = Math.max(this.hitStopTimer, seconds);
+  }
+
+  public isHitStopped(rawDt: number): boolean {
+    if (this.hitStopTimer > 0) {
+      this.hitStopTimer -= rawDt;
+      return true;
+    }
+    return false;
+  }
+
+  public addCameraShake(dir: THREE.Vector3, intensity: number): void {
+    this.shakeIntensity = Math.min(0.85, this.shakeIntensity + intensity);
+    this.shakeVel.copy(dir).normalize().multiplyScalar(intensity * 1.4);
+  }
+
+  public getCameraShakeOffset(): THREE.Vector3 {
+    return this.shakeOffset;
+  }
+
+  public spawnSlashArc(pos: THREE.Vector3, yaw: number, radius: number, colorHex: number, fullCircle = false): void {
+    const arcAngle = fullCircle ? Math.PI * 1.9 : Math.PI * 0.85;
+    const geo = new THREE.RingGeometry(radius * 0.55, radius, 22, 1, -arcAngle / 2, arcAngle);
+    geo.rotateX(-Math.PI / 2);
+    const mat = new THREE.MeshBasicMaterial({
+      color: colorHex,
+      transparent: true,
+      opacity: 0.9,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(pos.x, pos.y + 1.05, pos.z);
+    mesh.rotation.y = yaw - Math.PI / 2;
+    this.scene.add(mesh);
+    this.slashes.push({ mesh, life: 0.16, maxLife: 0.16, startYaw: mesh.rotation.y });
+  }
+
+  public spawnRing(pos: THREE.Vector3, maxScale: number, colorHex: number, duration = 0.35): void {
+    const mat = new THREE.MeshBasicMaterial({
+      color: colorHex,
+      transparent: true,
+      opacity: 0.85,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(this.ringGeo, mat);
+    mesh.position.set(pos.x, 0.08, pos.z);
+    mesh.scale.setScalar(0.2);
+    this.scene.add(mesh);
+    this.rings.push({ mesh, life: duration, maxLife: duration, maxScale });
+  }
+
+  public spawnBoneShatter(pos: THREE.Vector3, count = 16): void {
+    for (let i = 0; i < count; i++) {
+      const mat = new THREE.MeshStandardMaterial({
+        color: i % 3 === 0 ? 0xcfd6c4 : 0xe8e2d0,
+        roughness: 0.6,
+      });
+      const mesh = new THREE.Mesh(this.boxGeo, mat);
+      mesh.position.set(
+        pos.x + (Math.random() - 0.5) * 0.5,
+        pos.y + 0.6 + Math.random() * 0.8,
+        pos.z + (Math.random() - 0.5) * 0.5
+      );
+      mesh.scale.setScalar(0.7 + Math.random() * 0.7);
+      this.scene.add(mesh);
+      const angle = Math.random() * Math.PI * 2;
+      const spd = 2.5 + Math.random() * 4.5;
+      this.particles.push({
+        mesh,
+        vel: new THREE.Vector3(Math.cos(angle) * spd, 3.2 + Math.random() * 4.5, Math.sin(angle) * spd),
+        life: 0.7 + Math.random() * 0.35,
+        maxLife: 1.0,
+        gravity: 16,
+        spin: new THREE.Vector3(Math.random() * 12, Math.random() * 12, Math.random() * 12),
+      });
+    }
+  }
+
+  public spawnBurst(pos: THREE.Vector3, colorHex: number, count = 14, speed = 5.5): void {
+    for (let i = 0; i < count; i++) {
+      const mat = new THREE.MeshBasicMaterial({
+        color: colorHex,
+        transparent: true,
+        opacity: 1,
+        blending: THREE.AdditiveBlending,
+      });
+      const mesh = new THREE.Mesh(this.sparkGeo, mat);
+      mesh.position.copy(pos);
+      this.scene.add(mesh);
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.random() * Math.PI * 0.7;
+      const spd = speed * (0.4 + Math.random() * 0.8);
+      this.particles.push({
+        mesh,
+        vel: new THREE.Vector3(
+          Math.cos(theta) * Math.sin(phi) * spd,
+          Math.cos(phi) * spd + 1.5,
+          Math.sin(theta) * Math.sin(phi) * spd
+        ),
+        life: 0.35 + Math.random() * 0.25,
+        maxLife: 0.55,
+        gravity: 9,
+        spin: new THREE.Vector3(6, 8, 5),
+      });
+    }
+  }
+
+  public spawnLightningArc(from: THREE.Vector3, to: THREE.Vector3, colorHex = 0x7dd3fc): void {
+    const pts: THREE.Vector3[] = [];
+    const segs = 6;
+    for (let i = 0; i <= segs; i++) {
+      const t = i / segs;
+      const p = new THREE.Vector3().lerpVectors(from, to, t);
+      p.y += 1.0;
+      if (i > 0 && i < segs) {
+        p.x += (Math.random() - 0.5) * 0.75;
+        p.y += (Math.random() - 0.5) * 0.55;
+        p.z += (Math.random() - 0.5) * 0.75;
+      }
+      pts.push(p);
+    }
+    const geo = new THREE.BufferGeometry().setFromPoints(pts);
+    const mat = new THREE.LineBasicMaterial({ color: colorHex, transparent: true, opacity: 1 });
+    const line = new THREE.Line(geo, mat);
+    this.scene.add(line);
+    this.beams.push({ line, life: 0.18, maxLife: 0.18 });
+  }
+
+  public spawnDamageNumber(worldPos: THREE.Vector3, value: number | string, kind: 'normal' | 'crit' | 'heal' | 'player-hit' = 'normal'): void {
+    const el = document.createElement('div');
+    el.className = `dmg-num ${kind === 'normal' ? '' : kind}`;
+    el.textContent = typeof value === 'number' ? (kind === 'heal' ? `+${Math.round(value)}` : `${Math.round(value)}${kind === 'crit' ? '!' : ''}`) : value;
+    this.damageLayer.appendChild(el);
+    this.texts.push({
+      el,
+      worldPos: worldPos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.5, 1.9, (Math.random() - 0.5) * 0.5)),
+      life: 0.72,
+      maxLife: 0.72,
+      vy: 1.6,
+    });
+  }
+
+  public update(dt: number, camera: THREE.Camera): void {
+    // Update camera shake
+    if (this.shakeIntensity > 0.001) {
+      this.shakeOffset.set(
+        (Math.random() - 0.5) * 2 * this.shakeIntensity + this.shakeVel.x * 0.3,
+        (Math.random() - 0.5) * this.shakeIntensity,
+        (Math.random() - 0.5) * 2 * this.shakeIntensity + this.shakeVel.z * 0.3
+      );
+      this.shakeIntensity *= Math.pow(0.015, dt);
+      this.shakeVel.multiplyScalar(0.85);
+    } else {
+      this.shakeOffset.set(0, 0, 0);
+      this.shakeIntensity = 0;
+    }
+
+    // Particles
+    for (let i = this.particles.length - 1; i >= 0; i--) {
+      const p = this.particles[i];
+      p.life -= dt;
+      if (p.life <= 0) {
+        this.scene.remove(p.mesh);
+        (p.mesh.material as THREE.Material).dispose();
+        this.particles.splice(i, 1);
+        continue;
+      }
+      p.vel.y -= p.gravity * dt;
+      p.mesh.position.addScaledVector(p.vel, dt);
+      if (p.mesh.position.y < 0.08) {
+        p.mesh.position.y = 0.08;
+        p.vel.y *= -0.35;
+        p.vel.x *= 0.7;
+        p.vel.z *= 0.7;
+      }
+      p.mesh.rotation.x += p.spin.x * dt;
+      p.mesh.rotation.y += p.spin.y * dt;
+      const mat = p.mesh.material as THREE.MeshBasicMaterial;
+      if (mat.transparent) mat.opacity = Math.max(0, p.life / p.maxLife);
+    }
+
+    // Slash arcs
+    for (let i = this.slashes.length - 1; i >= 0; i--) {
+      const s = this.slashes[i];
+      s.life -= dt;
+      if (s.life <= 0) {
+        this.scene.remove(s.mesh);
+        s.mesh.geometry.dispose();
+        (s.mesh.material as THREE.Material).dispose();
+        this.slashes.splice(i, 1);
+        continue;
+      }
+      const t = 1 - s.life / s.maxLife;
+      s.mesh.rotation.y = s.startYaw + t * 0.65;
+      s.mesh.scale.setScalar(1 + t * 0.25);
+      (s.mesh.material as THREE.MeshBasicMaterial).opacity = (1 - t) * 0.9;
+    }
+
+    // Rings
+    for (let i = this.rings.length - 1; i >= 0; i--) {
+      const r = this.rings[i];
+      r.life -= dt;
+      if (r.life <= 0) {
+        this.scene.remove(r.mesh);
+        (r.mesh.material as THREE.Material).dispose();
+        this.rings.splice(i, 1);
+        continue;
+      }
+      const t = 1 - r.life / r.maxLife;
+      r.mesh.scale.setScalar(0.3 + t * r.maxScale);
+      (r.mesh.material as THREE.MeshBasicMaterial).opacity = (1 - t) * 0.85;
+    }
+
+    // Beams
+    for (let i = this.beams.length - 1; i >= 0; i--) {
+      const b = this.beams[i];
+      b.life -= dt;
+      if (b.life <= 0) {
+        this.scene.remove(b.line);
+        b.line.geometry.dispose();
+        (b.line.material as THREE.Material).dispose();
+        this.beams.splice(i, 1);
+        continue;
+      }
+      (b.line.material as THREE.LineBasicMaterial).opacity = b.life / b.maxLife;
+    }
+
+    // Floating damage numbers
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const proj = new THREE.Vector3();
+    for (let i = this.texts.length - 1; i >= 0; i--) {
+      const ft = this.texts[i];
+      ft.life -= dt;
+      if (ft.life <= 0) {
+        ft.el.remove();
+        this.texts.splice(i, 1);
+        continue;
+      }
+      ft.worldPos.y += ft.vy * dt;
+      ft.vy *= 0.94;
+      proj.copy(ft.worldPos).project(camera);
+      const sx = (proj.x * 0.5 + 0.5) * w;
+      const sy = (-proj.y * 0.5 + 0.5) * h;
+      ft.el.style.left = `${sx}px`;
+      ft.el.style.top = `${sy}px`;
+      ft.el.style.opacity = `${Math.min(1, (ft.life / ft.maxLife) * 1.6)}`;
+    }
+  }
+
+  public clearAll(): void {
+    for (const ft of this.texts) ft.el.remove();
+    this.texts = [];
+  }
+}
