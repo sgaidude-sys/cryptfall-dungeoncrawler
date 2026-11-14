@@ -12,7 +12,10 @@ export class HUDManager {
     private onSelectClass: (id: HeroClassId) => void,
     private onStartGame: () => void,
     private onPickRelic: (relic: RelicDef) => void,
-    private onRestart: () => void
+    private onRestart: () => void,
+    private onUIHover?: () => void,
+    private onUISelect?: () => void,
+    private onUIPopup?: () => void
   ) {
     this.root = document.getElementById('ui-root')!;
   }
@@ -32,6 +35,7 @@ export class HUDManager {
 
   public showRelicDraft(options: RelicDef[]): void {
     this.lastPhase = 'relic_draft';
+    this.onUIPopup?.();
     this.root.innerHTML = `
       <div class="modal-backdrop interactive">
         <div class="modal-title">Relic Shrine Blessing</div>
@@ -52,7 +56,9 @@ export class HUDManager {
       </div>
     `;
     this.root.querySelectorAll('.relic-card').forEach((btn) => {
+      btn.addEventListener('mouseenter', () => this.onUIHover?.());
       btn.addEventListener('click', () => {
+        this.onUISelect?.();
         const idx = Number((btn as HTMLElement).dataset.idx);
         this.onPickRelic(options[idx]);
       });
@@ -139,11 +145,16 @@ export class HUDManager {
     `;
 
     this.root.querySelectorAll('.class-tab').forEach((btn) => {
+      btn.addEventListener('mouseenter', () => this.onUIHover?.());
       btn.addEventListener('click', () => {
+        this.onUISelect?.();
         this.onSelectClass((btn as HTMLElement).dataset.class as HeroClassId);
       });
     });
-    document.getElementById('btn-descend')?.addEventListener('click', () => this.onStartGame());
+    document.getElementById('btn-descend')?.addEventListener('click', () => {
+      this.onUISelect?.();
+      this.onStartGame();
+    });
   }
 
   private renderPlayingShell(state: HUDState): void {

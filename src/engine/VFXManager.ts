@@ -29,6 +29,16 @@ interface BeamEffect {
   maxLife: number;
 }
 
+interface SpriteAnim {
+  mesh: THREE.Mesh;
+  tex: THREE.Texture;
+  cols: number;
+  rows: number;
+  frames: number;
+  life: number;
+  maxLife: number;
+}
+
 interface FloatingText {
   el: HTMLDivElement;
   worldPos: THREE.Vector3;
@@ -42,7 +52,10 @@ export class VFXManager {
   private slashes: SlashArc[] = [];
   private rings: RingEffect[] = [];
   private beams: BeamEffect[] = [];
+  private sprites: SpriteAnim[] = [];
   private texts: FloatingText[] = [];
+  private sheetCache = new Map<string, THREE.Texture>();
+  private texLoader = new THREE.TextureLoader();
 
   private hitStopTimer = 0;
   private shakeOffset = new THREE.Vector3();
@@ -173,7 +186,40 @@ export class VFXManager {
     }
   }
 
+  public spawnSpriteFX(pos: THREE.Vector3, sheetName: 'slash' | 'lightning', size = 2.4, colorHex = 0xffffff): void {
+    const path = sheetName === 'slash' ? './assets/vfx/slash_sheet.png' : './assets/vfx/lightning_sheet.png';
+    let baseTex = this.sheetCache.get(sheetName);
+    if (!baseTex) {
+      baseTex = this.texLoader.load(path);
+      baseTex.magFilter = THREE.NearestFilter;
+      baseTex.minFilter = THREE.NearestFilter;
+      this.sheetCache.set(sheetName, baseTex);
+    }
+    const tex = baseTex.clone();
+    tex.needsUpdate = true;
+    const cols = sheetName === 'slash' ? 5 : 8;
+    const rows = sheetName === 'slash' ? 2 : 1;
+    const frames = sheetName === 'slash' ? 9 : 8;
+    tex.repeat.set(1 / cols, 1 / rows);
+    tex.offset.set(0, 1 - 1 / rows);
+
+    const geo = new THREE.PlaneGeometry(size, size);
+    const mat = new THREE.MeshBasicMaterial({
+      map: tex,
+      color: colorHex,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(pos.x, pos.y + 1.15, pos.z);
+    this.scene.add(mesh);
+    this.sprites.push({ mesh, tex, cols, rows, frames, life: 0.24, maxLife: 0.24 });
+  }
+
   public spawnLightningArc(from: THREE.Vector3, to: THREE.Vector3, colorHex = 0x7dd3fc): void {
+    this.spawnSpriteFX(to, 'lightning', 2.2, colorHex);
     const pts: THREE.Vector3[] = [];
     const segs = 6;
     for (let i = 0; i <= segs; i++) {
@@ -291,6 +337,26 @@ export class VFXManager {
         continue;
       }
       (b.line.material as THREE.LineBasicMaterial).opacity = b.life / b.maxLife;
+    }
+
+    // Animated Sprite-Sheet FX billboards
+    for (let i = this.sprites.length - 1; i >= 0; i--) {
+      const sp = this.sprites[i];
+      sp.life -= dt;
+      if (sp.life <= 0) {
+        this.scene.remove(sp.mesh);
+        sp.mesh.geometry.dispose();
+        (sp.mesh.material as THREE.Material).dispose();
+        sp.tex.dispose();
+        this.sprites.splice(i, 1);
+        continue;
+      }
+      const t = 1 - sp.life / sp.maxLife;
+      const frame = Math.min(sp.frames - 1, Math.floor(t * sp.frames));
+      const col = frame % sp.cols;
+      const row = Math.floor(frame / sp.cols);
+      sp.tex.offset.set(col / sp.cols, 1 - (row + 1) / sp.rows);
+      sp.mesh.quaternion.copy(camera.quaternion);
     }
 
     // Floating damage numbers

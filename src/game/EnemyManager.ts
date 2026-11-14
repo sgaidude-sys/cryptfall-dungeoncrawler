@@ -6,7 +6,7 @@ import { SoundEngine } from '../audio/SoundEngine';
 import { DungeonFloorBuilder } from './DungeonGenerator';
 import { RoomData } from '../types';
 
-export type EnemyKind = 'warrior' | 'minion' | 'rogue' | 'mage' | 'boss';
+export type EnemyKind = 'warrior' | 'minion' | 'rogue' | 'mage' | 'imp' | 'puglin' | 'boss';
 
 export interface EnemyProjectile {
   mesh: THREE.Mesh;
@@ -20,7 +20,7 @@ export interface Enemy {
   kind: EnemyKind;
   name: string;
   mesh: THREE.Group;
-  anim: AnimatorHelper;
+  anim: AnimatorHelper | null;
   pos: THREE.Vector3;
   vel: THREE.Vector3;
   hp: number;
@@ -66,7 +66,7 @@ export class EnemyManager {
     }
 
     const count = room.type === 'trap' ? 3 : 4 + Math.min(4, floorNum);
-    const pool: EnemyKind[] = ['warrior', 'minion', 'rogue', 'mage'];
+    const pool: EnemyKind[] = ['warrior', 'minion', 'rogue', 'mage', 'imp', 'puglin'];
     for (let i = 0; i < count; i++) {
       const kind = pool[Math.floor(Math.random() * pool.length)];
       const angle = (i / count) * Math.PI * 2 + Math.random() * 0.5;
@@ -124,6 +124,33 @@ export class EnemyManager {
         rad: 0.55,
         s: 1.0,
         name: 'Ossuary Lich',
+        rigged: true,
+      },
+      imp: {
+        model: 'monsters/Imp.glb',
+        rWep: undefined,
+        lWep: undefined,
+        hp: 48,
+        speed: 4.1,
+        dmg: 13,
+        range: 9.5,
+        rad: 0.55,
+        s: 0.85,
+        name: 'Winged Imp',
+        rigged: false,
+      },
+      puglin: {
+        model: 'monsters/Puglin.glb',
+        rWep: undefined,
+        lWep: undefined,
+        hp: 62,
+        speed: 5.0,
+        dmg: 12,
+        range: 2.4,
+        rad: 0.58,
+        s: 1.05,
+        name: 'Feral Puglin',
+        rigged: false,
       },
       boss: {
         model: 'characters/Skeleton_Warrior.glb',
@@ -141,20 +168,27 @@ export class EnemyManager {
 
     const mesh = this.assets.cloneCharacter(cfg.model);
     mesh.scale.setScalar(cfg.s);
-    mesh.position.set(x, 0, z);
-    this.assets.attachToHand(mesh, cfg.rWep, 'right');
+    mesh.position.set(x, kind === 'imp' ? 0.75 : 0, z);
+    if (cfg.rWep) this.assets.attachToHand(mesh, cfg.rWep, 'right');
     if (cfg.lWep) this.assets.attachToHand(mesh, cfg.lWep, 'left');
 
     if (kind === 'boss') {
       const aura = new THREE.PointLight(0xff3344, 18, 12);
       aura.position.set(0, 2.2, 0);
       mesh.add(aura);
+    } else if (kind === 'imp') {
+      const aura = new THREE.PointLight(0xff6622, 6, 5);
+      aura.position.set(0, 0.8, 0);
+      mesh.add(aura);
     }
 
     this.scene.add(mesh);
 
-    const anim = new AnimatorHelper(mesh, this.assets);
-    anim.playOneShot('Skeletons_Spawn_Ground', 0.05, 1.4, 0.55);
+    let anim: AnimatorHelper | null = null;
+    if (!('rigged' in cfg) || cfg.rigged) {
+      anim = new AnimatorHelper(mesh, this.assets);
+      anim.playOneShot('Skeletons_Spawn_Ground', 0.05, 1.4, 0.55);
+    }
 
     const enemy: Enemy = {
       id: this.nextId++,
@@ -218,13 +252,13 @@ export class EnemyManager {
       enemy.dead = true;
       enemy.deathTimer = 0.85;
       this.clearTelegraph(enemy);
-      enemy.anim.clearOneShot();
-      enemy.anim.playOneShot('Skeletons_Death', 0.08, 1.3, 1.2);
+      enemy.anim?.clearOneShot();
+      enemy.anim?.playOneShot('Skeletons_Death', 0.08, 1.3, 1.2);
       this.vfx.spawnBoneShatter(enemy.pos, enemy.kind === 'boss' ? 34 : 14);
       this.sound.playBoneShatter();
       return true;
     } else if (enemy.state !== 'windup') {
-      enemy.anim.playOneShot('Hit_A', 0.05, 1.4, 0.22);
+      enemy.anim?.playOneShot('Hit_A', 0.05, 1.4, 0.22);
     }
     return false;
   }
@@ -237,10 +271,14 @@ export class EnemyManager {
   ): void {
     for (let i = this.enemies.length - 1; i >= 0; i--) {
       const e = this.enemies[i];
-      e.anim.update(dt);
+      e.anim?.update(dt);
 
       if (e.dead) {
         e.deathTimer -= dt;
+        if (!e.anim) {
+          e.mesh.rotation.y += dt * 10;
+          e.mesh.scale.setScalar(Math.max(0.01, e.baseScale * (e.deathTimer / 0.85)));
+        }
         if (e.deathTimer <= 0) {
           this.scene.remove(e.mesh);
           this.enemies.splice(i, 1);
@@ -276,9 +314,17 @@ export class EnemyManager {
 
       if (e.stunTimer > 0) {
         e.stunTimer -= dt;
-        e.anim.playLoop('Skeletons_Idle', 0.12);
+        e.anim?.playLoop('Skeletons_Idle', 0.12);
         if (e.stunTimer <= 0) e.state = 'chase';
         continue;
+      }
+
+      // Procedural hover/hop for Bestiary monsters
+      const tNow = performance.now() * 0.001 + e.id;
+      if (e.kind === 'imp') {
+        e.pos.y = 0.72 + Math.sin(tNow * 5.2) * 0.18;
+      } else if (e.kind === 'puglin') {
+        e.pos.y = e.state === 'chase' ? Math.abs(Math.sin(tNow * 11.5)) * 0.34 : 0;
       }
 
       const toPlayer = new THREE.Vector3().subVectors(playerPos, e.pos);
@@ -288,7 +334,7 @@ export class EnemyManager {
 
       if (e.state === 'cooldown') {
         e.stateTimer -= dt;
-        e.anim.playLoop('Skeletons_Idle', 0.14);
+        e.anim?.playLoop('Skeletons_Idle', 0.14);
         if (e.stateTimer <= 0) e.state = 'chase';
       } else if (e.state === 'windup') {
         e.stateTimer -= dt;
@@ -310,14 +356,14 @@ export class EnemyManager {
           e.stateTimer = e.kind === 'boss' ? 0.75 : e.kind === 'rogue' ? 0.65 : 0.55;
           e.attackTarget.copy(playerPos);
           this.createTelegraph(e, dir);
-          e.anim.playLoop('Skeletons_Idle', 0.1);
+          e.anim?.playLoop('Skeletons_Idle', 0.1);
         } else {
           const moveSpd = e.speed * spdMult;
           const nx = e.pos.x + dir.x * moveSpd * dt;
           const nz = e.pos.z + dir.z * moveSpd * dt;
           if (dungeon.isWalkable(nx, e.pos.z, e.radius)) e.pos.x = nx;
           if (dungeon.isWalkable(e.pos.x, nz, e.radius)) e.pos.z = nz;
-          e.anim.playLoop('Skeletons_Walking', 0.12, spdMult * 1.15);
+          e.anim?.playLoop('Skeletons_Walking', 0.12, spdMult * 1.15);
         }
       }
     }
@@ -387,18 +433,24 @@ export class EnemyManager {
     const dir = new THREE.Vector3().subVectors(e.attackTarget, e.pos).setY(0).normalize();
     if (dir.lengthSq() < 0.01) dir.set(0, 0, 1);
 
-    if (e.kind === 'rogue') {
-      e.anim.playOneShot('Ranged_1H_Shoot', 0.06, 1.3, 0.35);
-      this.sound.playBowTwang(0.8);
-      this.spawnProjectile(e.pos.clone().add(new THREE.Vector3(0, 1.1, 0)), dir.multiplyScalar(13.5), e.damage, 0xff4455);
+    if (e.kind === 'rogue' || e.kind === 'imp') {
+      e.anim?.playOneShot('Ranged_1H_Shoot', 0.06, 1.3, 0.35);
+      if (e.kind === 'imp') this.sound.playArcaneBlast(0.95);
+      else this.sound.playBowTwang(0.8);
+      this.spawnProjectile(
+        e.pos.clone().add(new THREE.Vector3(0, 1.1, 0)),
+        dir.multiplyScalar(e.kind === 'imp' ? 11.5 : 13.5),
+        e.damage,
+        e.kind === 'imp' ? 0xff7722 : 0xff4455
+      );
     } else if (e.kind === 'mage') {
-      e.anim.playOneShot('Ranged_Magic_Shoot', 0.06, 1.3, 0.4);
+      e.anim?.playOneShot('Ranged_Magic_Shoot', 0.06, 1.3, 0.4);
       this.sound.playArcaneBlast(0.85);
       this.vfx.spawnRing(e.attackTarget, 2.5, 0xff3366, 0.3);
       const d = Math.hypot(playerPos.x - e.attackTarget.x, playerPos.z - e.attackTarget.z);
       if (d < 2.4) onPlayerHit(e.damage, dir);
     } else if (e.kind === 'boss') {
-      e.anim.playOneShot('Melee_1H_Attack_Slice_Horizontal', 0.06, 1.1, 0.5);
+      e.anim?.playOneShot('Melee_1H_Attack_Slice_Horizontal', 0.06, 1.1, 0.5);
       this.sound.playExplosion();
       this.vfx.spawnRing(e.pos, 4.3, 0xff3344, 0.4);
       this.vfx.addCameraShake(dir, 0.35);
@@ -417,11 +469,11 @@ export class EnemyManager {
         );
       }
     } else {
-      e.anim.playOneShot('Melee_1H_Attack_Chop', 0.06, 1.35, 0.35);
-      e.vel.addScaledVector(dir, 5.2);
+      e.anim?.playOneShot('Melee_1H_Attack_Chop', 0.06, 1.35, 0.35);
+      e.vel.addScaledVector(dir, e.kind === 'puglin' ? 7.8 : 5.2);
       this.sound.playSwordClang(0.65);
-      this.vfx.spawnSlashArc(e.pos, Math.atan2(dir.x, dir.z), e.range, 0xff4444);
-      if (e.pos.distanceTo(playerPos) <= e.range + 0.4) {
+      this.vfx.spawnSlashArc(e.pos, Math.atan2(dir.x, dir.z), e.range, e.kind === 'puglin' ? 0xfacc15 : 0xff4444);
+      if (e.pos.distanceTo(playerPos) <= e.range + 0.45) {
         onPlayerHit(e.damage, dir);
       }
     }

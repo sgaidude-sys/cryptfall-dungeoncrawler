@@ -102,7 +102,10 @@ export class GameEngine {
       (id) => this.selectPreviewClass(id),
       () => this.startRun(),
       (relic) => this.applyRelicChoice(relic),
-      () => this.returnToTitle()
+      () => this.returnToTitle(),
+      () => this.sound.playUIHover(),
+      () => { this.sound.unlock(); this.sound.playUISelect(); },
+      () => this.sound.playUIPopup()
     );
 
     this.bindInputs();

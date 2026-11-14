@@ -2,6 +2,8 @@ export class SoundEngine {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
   private noiseBuffer: AudioBuffer | null = null;
+  private sfxBuffers = new Map<string, AudioBuffer>();
+  private sfxLoading = false;
   private droneGain: GainNode | null = null;
   private combatIntensity = 0; // 0..1
   private percTimer = 0;
@@ -17,10 +19,56 @@ export class SoundEngine {
       this.masterGain.connect(this.ctx.destination);
       this.noiseBuffer = this.createNoiseBuffer(1.5);
       this.startDungeonDrone();
+      this.preloadSfxBuffers();
     }
     if (this.ctx.state === 'suspended') {
       this.ctx.resume().catch(() => {});
     }
+  }
+
+  private async preloadSfxBuffers(): Promise<void> {
+    if (this.sfxLoading || !this.ctx) return;
+    this.sfxLoading = true;
+    const files = [
+      'ui_hover.mp3', 'ui_select.mp3', 'ui_popup.mp3',
+      'step1.mp3', 'step2.mp3',
+      'fire_burst.wav', 'heavy_impact.wav', 'ice_nova.wav',
+      'voice_atk1.wav', 'voice_atk2.wav', 'voice_hit1.wav', 'voice_hit2.wav',
+    ];
+    for (const f of files) {
+      try {
+        const res = await fetch(`./assets/sfx/${f}`);
+        if (!res.ok) continue;
+        const arr = await res.arrayBuffer();
+        const buf = await this.ctx.decodeAudioData(arr);
+        this.sfxBuffers.set(f, buf);
+      } catch {
+        // Fallback to procedural synth if decode fails
+      }
+    }
+  }
+
+  private playBuffer(name: string, gainVal = 0.5, rateMin = 0.94, rateMax = 1.06): boolean {
+    if (!this.ctx || !this.masterGain || this.muted) return false;
+    const buf = this.sfxBuffers.get(name);
+    if (!buf) return false;
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    src.playbackRate.value = rateMin + Math.random() * (rateMax - rateMin);
+    const g = this.ctx.createGain();
+    g.gain.value = gainVal;
+    src.connect(g);
+    g.connect(this.masterGain);
+    src.start();
+    return true;
+  }
+
+  public playUIHover(): void { this.playBuffer('ui_hover.mp3', 0.25, 0.98, 1.04); }
+  public playUISelect(): void { this.playBuffer('ui_select.mp3', 0.35, 0.98, 1.03); }
+  public playUIPopup(): void { this.playBuffer('ui_popup.mp3', 0.38, 0.98, 1.02); }
+  public playIceNova(): void { this.playBuffer('ice_nova.wav', 0.42, 0.95, 1.05); }
+  public playBattleCry(): void {
+    if (Math.random() < 0.65) this.playBuffer(Math.random() < 0.5 ? 'voice_atk1.wav' : 'voice_atk2.wav', 0.45, 0.94, 1.06);
   }
 
   public setCombatIntensity(target: number): void {
@@ -247,6 +295,7 @@ export class SoundEngine {
 
   public playFootstep(): void {
     if (!this.ctx || !this.masterGain) return;
+    if (this.playBuffer(Math.random() < 0.5 ? 'step1.mp3' : 'step2.mp3', 0.22, 0.88, 1.15)) return;
     const pitch = 0.8 + Math.random() * 0.4;
     this.playNoiseBurst(0.04, 340 * pitch, 'lowpass', 0.065);
   }
@@ -259,12 +308,16 @@ export class SoundEngine {
   public playPlayerHit(): void {
     if (!this.ctx || !this.masterGain) return;
     this.playAxeThud(0.85);
+    this.playBuffer(Math.random() < 0.5 ? 'voice_hit1.wav' : 'voice_hit2.wav', 0.42, 0.94, 1.05);
   }
 
   public playExplosion(): void {
     if (!this.ctx || !this.masterGain) return;
-    this.playAxeThud(1.25);
-    this.playNoiseBurst(0.28, 420, 'lowpass', 0.35);
+    this.playAxeThud(1.1);
+    if (!this.playBuffer('fire_burst.wav', 0.45, 0.92, 1.08)) {
+      this.playNoiseBurst(0.28, 420, 'lowpass', 0.35);
+    }
+    this.playBuffer('heavy_impact.wav', 0.38, 0.95, 1.05);
   }
 
   private playNoiseBurst(dur: number, freq: number, type: BiquadFilterType, gainVal: number): void {

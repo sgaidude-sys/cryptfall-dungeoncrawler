@@ -23,6 +23,9 @@ export class AssetManager {
       'characters/Skeleton_Minion.glb',
       'characters/Skeleton_Rogue.glb',
       'characters/Skeleton_Mage.glb',
+      // Bestiary Monsters
+      'monsters/Imp.glb',
+      'monsters/Puglin.glb',
       // Weapons & Shields
       'weapons/sword_1handed.gltf',
       'weapons/shield_badge_color.gltf',
@@ -130,11 +133,13 @@ export class AssetManager {
 
   private unifyMaterials(root: THREE.Object3D, assetPath: string): void {
     const isDungeon = assetPath.startsWith('dungeon/');
+    const isMonster = assetPath.startsWith('monsters/');
     root.traverse((obj) => {
       if (!(obj instanceof THREE.Mesh)) return;
       obj.castShadow = true;
       obj.receiveShadow = true;
 
+      if (isMonster) return;
       const origMat = obj.material as THREE.MeshStandardMaterial;
       if (!origMat) return;
 

@@ -174,6 +174,7 @@ export class PlayerController {
       this.vfx.spawnBurst(this.pos.clone().add(new THREE.Vector3(0, 0.4, 0)), 0x94a3b8, 8, 3.5);
 
       if (this.hasRelic('frost_dodge')) {
+        this.sound.playIceNova();
         this.vfx.spawnRing(this.pos, 4.0, 0x38bdf8, 0.38);
         for (const e of enemies.enemies) {
           if (!e.dead && e.pos.distanceTo(this.pos) <= 4.0) {
@@ -323,6 +324,7 @@ export class PlayerController {
           const dir = dist > 0.01 ? toE.clone().divideScalar(dist) : forward;
           if (isFullCircle || forward.dot(dir) > 0.15 || dist < 1.2) {
             this.applyHitToEnemy(e, dmg, dir, isCrit, enemies, 0);
+            this.vfx.spawnSpriteFX(e.pos, 'slash', isCrit ? 2.6 : 1.9, parseInt(this.def.accentHex.slice(1), 16));
             hitAny = true;
           }
         }
@@ -336,6 +338,7 @@ export class PlayerController {
 
   private useActiveSkill(dungeon: DungeonFloorBuilder, enemies: EnemyManager): void {
     this.skillCd = this.def.skillCooldown * this.getCdMult();
+    this.sound.playBattleCry();
     this.mesh.rotation.y = this.aimYaw;
     const forward = new THREE.Vector3(Math.sin(this.aimYaw), 0, Math.cos(this.aimYaw));
     const { dmg } = this.getDamageStat();
