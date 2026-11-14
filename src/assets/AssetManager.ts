@@ -172,7 +172,23 @@ export class AssetManager {
       obj.castShadow = true;
       obj.receiveShadow = true;
 
-      if (isMonster || isFantasyProp || isPackWeapon) return;
+      if (isMonster || isFantasyProp) return;
+      if (isPackWeapon) {
+        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+        for (const m of mats) {
+          if (m instanceof THREE.MeshStandardMaterial) {
+            m.opacity = 1;
+            m.alphaTest = 0;
+            m.transparent = false;
+            if (/gold|steel|iron|silver|blade/i.test(m.name)) {
+              m.metalness = 0.55;
+              m.roughness = 0.32;
+            }
+            m.needsUpdate = true;
+          }
+        }
+        return;
+      }
       const origMat = obj.material as THREE.MeshStandardMaterial;
       if (!origMat) return;
 
