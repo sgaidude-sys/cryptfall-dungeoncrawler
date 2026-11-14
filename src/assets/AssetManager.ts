@@ -233,8 +233,13 @@ export class AssetManager {
   }
 
   public attachToHand(character: THREE.Object3D, weaponPath: string, hand: 'right' | 'left'): void {
-    const slotName = hand === 'right' ? 'handslot.r' : 'handslot.l';
-    const bone = character.getObjectByName(slotName);
+    const rawSlot = hand === 'right' ? 'handslot.r' : 'handslot.l';
+    const sanitizedSlot = hand === 'right' ? 'handslotr' : 'handslotl';
+    const fallbackHand = hand === 'right' ? 'handr' : 'handl';
+    const bone =
+      character.getObjectByName(sanitizedSlot) ??
+      character.getObjectByName(rawSlot) ??
+      character.getObjectByName(fallbackHand);
     if (!bone) return;
     while (bone.children.length > 0) {
       bone.remove(bone.children[0]);
