@@ -21,6 +21,9 @@ export interface HeroClassDef {
   skillName: string;
   skillDesc: string;
   skillCooldown: number;
+  skill2Name: string;
+  skill2Desc: string;
+  skill2Cooldown: number;
   ultName: string;
   ultDesc: string;
   ultCooldown: number;
@@ -63,18 +66,42 @@ export interface RoomData {
   doors: { n?: boolean; s?: boolean; e?: boolean; w?: boolean };
 }
 
-export type GamePhase = 'loading' | 'menu' | 'title' | 'playing' | 'paused' | 'relic_draft' | 'dead';
+export type SkillNodeId =
+  | 'weapon_mastery'
+  | 'relentless_tempo'
+  | 'unlock_skill2'
+  | 'skill_overcharge'
+  | 'iron_vitality'
+  | 'executioner_surge';
+
+export interface SkillNodeDef {
+  id: SkillNodeId;
+  branch: 'Combat' | 'Arcane' | 'Vanguard';
+  tier: 1 | 2;
+  name: string;
+  desc: string;
+  requires?: SkillNodeId;
+}
+
+export type GamePhase = 'loading' | 'menu' | 'title' | 'playing' | 'paused' | 'relic_draft' | 'skill_tree' | 'dead';
 
 export interface HUDState {
   phase: GamePhase;
   floor: number;
   kills: number;
   gold: number;
+  level: number;
+  xp: number;
+  xpToNext: number;
+  skillPoints: number;
+  unlockedSkills: SkillNodeId[];
   selectedClass: HeroClassId;
   hp: number;
   maxHp: number;
   skillCd: number;
   skillMaxCd: number;
+  skill2Cd: number;
+  skill2MaxCd: number;
   ultCd: number;
   ultMaxCd: number;
   dodgeCd: number;

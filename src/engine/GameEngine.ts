@@ -12,7 +12,7 @@ import { PlayerController } from '../game/PlayerController';
 import { HERO_CLASSES } from '../game/classes';
 import { pickRandomRelics } from '../game/relics';
 import { HUDManager } from '../ui/HUD';
-import { GamePhase, HeroClassId, HUDState, RelicDef, RoomData } from '../types';
+import { GamePhase, HeroClassId, HUDState, RelicDef, RoomData, SkillNodeId } from '../types';
 import { VFXManager } from './VFXManager';
 import { AnimatorHelper } from './AnimatorHelper';
 import { CutsceneManager } from './CutsceneManager';
@@ -50,6 +50,7 @@ export class GameEngine {
   private aimWorld = new THREE.Vector3();
   private attackHeld = false;
   private skillQueued = false;
+  private skill2Queued = false;
   private ultQueued = false;
   private dodgeQueued = false;
   private interactQueued = false;
@@ -125,7 +126,9 @@ export class GameEngine {
       () => {
         this.sound.unlock();
         return this.sound.toggleMute();
-      }
+      },
+      () => this.toggleSkillTree(),
+      (id) => this.unlockSkillNode(id)
     );
 
     this.bindInputs();
@@ -175,9 +178,27 @@ export class GameEngine {
       this.phase = 'paused';
       this.attackHeld = false;
       this.sound.playUIPopup();
-    } else if (this.phase === 'paused') {
+    } else if (this.phase === 'paused' || this.phase === 'skill_tree') {
       this.phase = 'playing';
       this.sound.playUISelect();
+    }
+  }
+
+  private toggleSkillTree(): void {
+    if (this.phase === 'playing') {
+      this.phase = 'skill_tree';
+      this.attackHeld = false;
+      this.sound.playUIPopup();
+    } else if (this.phase === 'skill_tree') {
+      this.phase = 'playing';
+      this.sound.playUISelect();
+    }
+  }
+
+  private unlockSkillNode(id: SkillNodeId): void {
+    if (!this.player) return;
+    if (this.player.unlockSkill(id)) {
+      this.hud.refreshSkillTree(this.buildHudState(null));
     }
   }
 
@@ -194,6 +215,9 @@ export class GameEngine {
     }
     this.floor = 1;
     this.player = new PlayerController(this.selectedClass, this.scene, this.assets, this.vfx, this.sound);
+    this.player.onLevelUp = (lvl) => {
+      this.showBanner(`LEVEL ${lvl}! +1 SKILL POINT — PRESS [K]`);
+    };
     this.buildFloor(1);
     this.phase = 'playing';
     this.player.anim.playOneShot('Spawn_Ground', 0.05, 1.0, 1.1);
@@ -260,13 +284,18 @@ export class GameEngine {
         this.cutscenes.skip();
         return;
       }
-      if (k === 'escape' && (this.phase === 'playing' || this.phase === 'paused')) {
+      if (k === 'escape' && (this.phase === 'playing' || this.phase === 'paused' || this.phase === 'skill_tree')) {
         this.togglePause();
+        return;
+      }
+      if (k === 'k' && (this.phase === 'playing' || this.phase === 'skill_tree')) {
+        this.toggleSkillTree();
         return;
       }
       this.keys.add(k);
       if (k === 'q' || k === '1') this.skillQueued = true;
-      if (k === 'r' || k === '2') this.ultQueued = true;
+      if (k === 'c' || k === '2') this.skill2Queued = true;
+      if (k === 'r' || k === '3') this.ultQueued = true;
       if (k === ' ' || k === 'shift') this.dodgeQueued = true;
       if (k === 'e' || k === 'f') this.interactQueued = true;
       if (k === 'm') this.sound.toggleMute();
@@ -359,12 +388,14 @@ export class GameEngine {
         this.aimWorld,
         this.attackHeld,
         this.skillQueued,
+        this.skill2Queued,
         this.ultQueued,
         this.dodgeQueued,
         this.dungeon,
         this.enemies
       );
       this.skillQueued = false;
+      this.skill2Queued = false;
       this.ultQueued = false;
       this.dodgeQueued = false;
 
@@ -513,11 +544,18 @@ export class GameEngine {
       floor: this.floor,
       kills: this.player?.kills ?? 0,
       gold: this.player?.gold ?? 0,
+      level: this.player?.level ?? 1,
+      xp: this.player?.xp ?? 0,
+      xpToNext: this.player?.xpToNext ?? 90,
+      skillPoints: this.player?.skillPoints ?? 0,
+      unlockedSkills: this.player ? Array.from(this.player.unlockedSkills) : [],
       selectedClass: this.selectedClass,
       hp: this.player?.hp ?? 0,
       maxHp: this.player?.maxHp ?? 100,
       skillCd: this.player?.skillCd ?? 0,
       skillMaxCd: this.player?.def.skillCooldown ?? 1,
+      skill2Cd: this.player?.skill2Cd ?? 0,
+      skill2MaxCd: this.player?.def.skill2Cooldown ?? 1,
       ultCd: this.player?.ultCd ?? 0,
       ultMaxCd: this.player?.def.ultCooldown ?? 1,
       dodgeCd: this.player?.dodgeCd ?? 0,

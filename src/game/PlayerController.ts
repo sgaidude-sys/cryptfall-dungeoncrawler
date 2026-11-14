@@ -6,7 +6,7 @@ import { SoundEngine } from '../audio/SoundEngine';
 import { HERO_CLASSES } from './classes';
 import { DungeonFloorBuilder } from './DungeonGenerator';
 import { Enemy, EnemyManager } from './EnemyManager';
-import { HeroClassDef, HeroClassId, RelicId } from '../types';
+import { HeroClassDef, HeroClassId, RelicId, SkillNodeId } from '../types';
 
 interface PlayerProjectile {
   mesh: THREE.Object3D;
@@ -34,9 +34,16 @@ export class PlayerController {
   public relics: RelicId[] = [];
   public kills = 0;
   public gold = 0;
+  public level = 1;
+  public xp = 0;
+  public xpToNext = 90;
+  public skillPoints = 1;
+  public unlockedSkills = new Set<SkillNodeId>();
+  public onLevelUp?: (level: number) => void;
 
   public attackCd = 0;
   public skillCd = 0;
+  public skill2Cd = 0;
   public ultCd = 0;
   public dodgeCd = 0;
   public dodgeMaxCd = 1.45;
@@ -110,8 +117,10 @@ export class PlayerController {
 
   private getDamageStat(): { dmg: number; isCrit: boolean } {
     let base = this.def.damage;
+    if (this.hasSkill('weapon_mastery')) base *= 1.22;
     if (this.hasRelic('titanic_cleave')) base *= 1.28;
     let crit = this.def.critChance;
+    if (this.hasSkill('weapon_mastery')) crit += 0.08;
     if (this.hasRelic('berserker_blood')) crit += 0.15;
     if (this.hasRelic('swiftfoot')) crit += 0.1;
     const isCrit = Math.random() < crit;
@@ -119,7 +128,48 @@ export class PlayerController {
   }
 
   private getCdMult(): number {
-    return this.hasRelic('arcane_echo') ? 0.7 : 1.0;
+    let mult = this.hasRelic('arcane_echo') ? 0.7 : 1.0;
+    if (this.hasSkill('relentless_tempo')) mult *= 0.85;
+    return mult;
+  }
+
+  public hasSkill(id: SkillNodeId): boolean {
+    return this.unlockedSkills.has(id);
+  }
+
+  public unlockSkill(id: SkillNodeId): boolean {
+    if (this.skillPoints <= 0 || this.unlockedSkills.has(id)) return false;
+    this.skillPoints--;
+    this.unlockedSkills.add(id);
+    if (id === 'iron_vitality') {
+      this.maxHp += 35;
+      this.heal(35);
+    }
+    if (id === 'weapon_mastery') {
+      if (this.def.id === 'knight') {
+        this.assets.attachToHand(this.mesh, 'weapons/pack_claymore.glb', 'right');
+      } else if (this.def.id === 'barbarian') {
+        this.assets.attachToHand(this.mesh, 'weapons/pack_hammer_double.glb', 'right');
+      }
+      this.vfx.spawnBrackeysBurst(this.pos.clone().add(new THREE.Vector3(0, 1.2, 0)), 'flare', 0xfde047, 2.5, 0.45);
+    }
+    this.sound.playUIPopup();
+    return true;
+  }
+
+  public grantXp(amount: number): void {
+    this.xp += amount;
+    while (this.xp >= this.xpToNext) {
+      this.xp -= this.xpToNext;
+      this.level++;
+      this.xpToNext = Math.round(this.xpToNext * 1.35);
+      this.skillPoints++;
+      this.heal(20);
+      this.vfx.spawnBrackeysGroundEffect(this.pos, 'magic_rune', 0xfacc15, 4.2, 0.65, 2);
+      this.vfx.spawnBurst(this.pos.clone().add(new THREE.Vector3(0, 1.0, 0)), 0xfde047, 20, 6);
+      this.sound.playUIPopup();
+      this.onLevelUp?.(this.level);
+    }
   }
 
   public update(
@@ -128,6 +178,7 @@ export class PlayerController {
     aimWorld: THREE.Vector3,
     attackHeld: boolean,
     skillPressed: boolean,
+    skill2Pressed: boolean,
     ultPressed: boolean,
     dodgePressed: boolean,
     dungeon: DungeonFloorBuilder,
@@ -136,6 +187,7 @@ export class PlayerController {
     this.anim.update(dt);
     if (this.attackCd > 0) this.attackCd = Math.max(0, this.attackCd - dt);
     if (this.skillCd > 0) this.skillCd = Math.max(0, this.skillCd - dt);
+    if (this.skill2Cd > 0) this.skill2Cd = Math.max(0, this.skill2Cd - dt);
     if (this.ultCd > 0) this.ultCd = Math.max(0, this.ultCd - dt);
     if (this.dodgeCd > 0) this.dodgeCd = Math.max(0, this.dodgeCd - dt);
     if (this.iFrames > 0) this.iFrames = Math.max(0, this.iFrames - dt);
@@ -230,7 +282,10 @@ export class PlayerController {
     } else {
       const moveLen = moveInput.length();
       if (moveLen > 0.05) {
-        const spd = this.def.speed * (this.hasRelic('swiftfoot') ? 1.2 : 1.0);
+        const spd =
+          this.def.speed *
+          (this.hasRelic('swiftfoot') ? 1.2 : 1.0) *
+          (this.hasSkill('iron_vitality') ? 1.12 : 1.0);
         const vx = (moveInput.x / moveLen) * spd;
         const vz = (moveInput.y / moveLen) * spd;
         this.tryMove(vx * dt, vz * dt, dungeon);
@@ -252,6 +307,8 @@ export class PlayerController {
       // Signature Active Skills & Ultimate
       if (ultPressed && this.ultCd <= 0) {
         this.useUltimate(aimWorld, enemies);
+      } else if (skill2Pressed && this.hasSkill('unlock_skill2') && this.skill2Cd <= 0) {
+        this.useSecondSkill(dungeon, enemies);
       } else if (skillPressed && this.skillCd <= 0) {
         this.useActiveSkill(dungeon, enemies);
       } else if (attackHeld && this.attackCd <= 0 && this.whirlwindTimer <= 0) {
@@ -299,7 +356,8 @@ export class PlayerController {
   }
 
   private usePrimaryAttack(_enemies: EnemyManager): void {
-    const atkSpdMult = this.hasRelic('berserker_blood') ? 1.25 : 1.0;
+    const atkSpdMult =
+      (this.hasRelic('berserker_blood') ? 1.25 : 1.0) * (this.hasSkill('relentless_tempo') ? 1.2 : 1.0);
     this.attackCd = this.def.attackCooldown / atkSpdMult;
     this.mesh.rotation.y = this.aimYaw;
 
@@ -380,6 +438,72 @@ export class PlayerController {
         this.vfx.triggerHitStop(isCrit || this.def.id === 'barbarian' ? 0.048 : 0.024);
         this.vfx.addCameraShake(forward, isCrit ? 0.26 : this.def.id === 'barbarian' ? 0.18 : 0.10);
       }
+    }
+  }
+
+  private getSkillDamageMult(): number {
+    return this.hasSkill('skill_overcharge') ? 1.35 : 1.0;
+  }
+
+  private useSecondSkill(dungeon: DungeonFloorBuilder, enemies: EnemyManager): void {
+    this.skill2Cd = this.def.skill2Cooldown * this.getCdMult();
+    this.sound.playBattleCry();
+    this.mesh.rotation.y = this.aimYaw;
+    const forward = new THREE.Vector3(Math.sin(this.aimYaw), 0, Math.cos(this.aimYaw));
+    const { dmg } = this.getDamageStat();
+    const skillDmg = Math.round(dmg * this.getSkillDamageMult());
+
+    if (this.def.id === 'knight') {
+      // Vorpal Blade Wave
+      this.anim.playOneShot('UAL2_Melee_Hook', 0.04, 1.35, 0.35);
+      this.sound.playSwordClang(1.3);
+      const spawnPos = this.pos.clone().add(new THREE.Vector3(forward.x * 0.8, 1.1, forward.z * 0.8));
+      this.vfx.spawnBrackeysSlash(this.pos, this.aimYaw, 0xfacc15, 3.0, false);
+      this.spawnProjectile(spawnPos, forward.clone().multiplyScalar(18), Math.round(skillDmg * 1.9), true, 6, 0, 0, 0xfacc15, 'magic');
+    } else if (this.def.id === 'barbarian') {
+      // Earthshaker: 3 magma shockwave bolts forward
+      this.anim.playOneShot('UAL2_Sword_Heavy_Combo', 0.04, 1.4, 0.45);
+      this.sound.playExplosion();
+      this.vfx.spawnBrackeysGroundEffect(this.pos, 'scorch', 0xf97316, 4.4, 0.45, 0);
+      this.vfx.addCameraShake(forward, 0.32);
+      const spawnPos = this.pos.clone().add(new THREE.Vector3(forward.x * 0.8, 0.9, forward.z * 0.8));
+      for (let i = -1; i <= 1; i++) {
+        const a = this.aimYaw + i * 0.24;
+        const dir = new THREE.Vector3(Math.sin(a), 0, Math.cos(a));
+        this.spawnProjectile(spawnPos.clone(), dir.multiplyScalar(15), Math.round(skillDmg * 1.7), true, 3, 0, 2.2, 0xf97316, 'magic');
+      }
+    } else if (this.def.id === 'rogue') {
+      // Phantom Volley + Shadow Backflip
+      this.anim.playOneShot('UAL2_Melee_Hook', 0.04, 1.5, 0.3);
+      this.sound.playDodge();
+      this.vfx.spawnBrackeysBurst(this.pos.clone().add(new THREE.Vector3(0, 1, 0)), 'smoke', 0x34d399, 2.2, 0.35);
+      const spawnPos = this.pos.clone().add(new THREE.Vector3(0, 1.1, 0));
+      for (let i = -1; i <= 1; i++) {
+        const a = this.aimYaw + i * 0.2;
+        const dir = new THREE.Vector3(Math.sin(a), 0, Math.cos(a));
+        this.spawnProjectile(spawnPos.clone(), dir.multiplyScalar(22), Math.round(skillDmg * 1.5), true, 2, 0, 0, 0x34d399, 'dagger');
+      }
+      for (let s = 0; s < 5; s++) this.tryMove(-forward.x * 0.5, -forward.z * 0.5, dungeon);
+    } else if (this.def.id === 'mage') {
+      // Arcane Nova: 4.8m frost-arcane pulse
+      this.anim.playOneShot('Ranged_Magic_Summon', 0.04, 1.45, 0.38);
+      this.sound.playIceNova();
+      this.vfx.spawnBrackeysGroundEffect(this.pos, 'magic_rune', 0x38bdf8, 5.2, 0.55, 4);
+      this.vfx.spawnRing(this.pos, 4.8, 0x38bdf8, 0.45);
+      for (const e of [...enemies.enemies]) {
+        if (!e.dead && e.pos.distanceTo(this.pos) <= 4.8) {
+          e.chillTimer = 3.5;
+          const dir = new THREE.Vector3().subVectors(e.pos, this.pos).setY(0).normalize();
+          this.applyHitToEnemy(e, Math.round(skillDmg * 1.85), dir, true, enemies, 0.7);
+        }
+      }
+    } else if (this.def.id === 'ranger') {
+      // Frost Snare Shot: Explosive Frost Arrow
+      this.anim.playOneShot('Ranged_Bow_Release', 0.04, 1.4, 0.3);
+      this.sound.playIceNova();
+      const spawnPos = this.pos.clone().add(new THREE.Vector3(forward.x * 0.7, 1.15, forward.z * 0.7));
+      this.vfx.spawnBrackeysBurst(spawnPos, 'spark', 0x38bdf8, 1.5, 0.22);
+      this.spawnProjectile(spawnPos, forward.clone().multiplyScalar(22), Math.round(skillDmg * 1.9), true, 0, 0, 3.6, 0x38bdf8, 'arrow');
     }
   }
 
@@ -702,8 +826,13 @@ export class PlayerController {
     const killed = enemies.damageEnemy(enemy, damage, dir, isCrit, stunSec);
     if (killed) {
       this.kills++;
-      this.gold += enemy.kind === 'boss' ? 120 : 12;
+      this.gold += enemy.isBoss ? 120 : 12;
+      this.grantXp(enemy.isBoss ? 120 : 25);
       if (this.hasRelic('berserker_blood')) this.heal(4);
+      if (this.hasSkill('executioner_surge')) {
+        this.heal(6);
+        this.ultCd = Math.max(0, this.ultCd - 1.5);
+      }
     }
 
     this.hitCounter++;

@@ -47,6 +47,15 @@ export class AssetManager {
       'weapons/Skeleton_Crossbow.gltf',
       'weapons/Skeleton_Staff.gltf',
       'weapons/Skeleton_Axe.gltf',
+      // Weapons Pack (Blender-aligned GLBs)
+      'weapons/pack_sword_golden.glb',
+      'weapons/pack_claymore.glb',
+      'weapons/pack_axe_double.glb',
+      'weapons/pack_hammer_double.glb',
+      'weapons/pack_dagger.glb',
+      'weapons/pack_bow_golden.glb',
+      'weapons/pack_shield_celtic.glb',
+      'weapons/pack_scythe.glb',
       // Dungeon Pack 1.0
       'dungeon/tileBrickA_medium.gltf.glb',
       'dungeon/tileBrickB_medium.gltf.glb',
@@ -157,12 +166,13 @@ export class AssetManager {
     const isDungeon = assetPath.startsWith('dungeon/');
     const isMonster = assetPath.startsWith('monsters/');
     const isFantasyProp = assetPath.startsWith('props_fantasy/');
+    const isPackWeapon = assetPath.startsWith('weapons/pack_');
     root.traverse((obj) => {
       if (!(obj instanceof THREE.Mesh)) return;
       obj.castShadow = true;
       obj.receiveShadow = true;
 
-      if (isMonster || isFantasyProp) return;
+      if (isMonster || isFantasyProp || isPackWeapon) return;
       const origMat = obj.material as THREE.MeshStandardMaterial;
       if (!origMat) return;
 
@@ -226,8 +236,12 @@ export class AssetManager {
     const slotName = hand === 'right' ? 'handslot.r' : 'handslot.l';
     const bone = character.getObjectByName(slotName);
     if (!bone) return;
+    while (bone.children.length > 0) {
+      bone.remove(bone.children[0]);
+    }
     const weapon = this.cloneProp(weaponPath);
-    weapon.scale.setScalar(weaponPath.includes('shield') ? 1.25 : 1.45);
+    const isPack = weaponPath.startsWith('weapons/pack_');
+    weapon.scale.setScalar(isPack ? 1.05 : weaponPath.includes('shield') ? 1.25 : 1.45);
     if (weaponPath.includes('bow_withString')) {
       weapon.rotation.set(0, Math.PI * 0.5, 0);
     } else if (weaponPath.includes('shield')) {

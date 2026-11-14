@@ -1,6 +1,6 @@
-import { HERO_CLASSES, HERO_CLASS_ORDER } from '../game/classes';
+import { HERO_CLASSES, HERO_CLASS_ORDER, SKILL_TREE_NODES } from '../game/classes';
 import { RELICS } from '../game/relics';
-import { HeroClassId, HUDState, RelicDef, RoomData } from '../types';
+import { HeroClassId, HUDState, RelicDef, RoomData, SkillNodeId } from '../types';
 
 export class HUDManager {
   private root: HTMLElement;
@@ -22,7 +22,9 @@ export class HUDManager {
     private onRestartRun?: () => void,
     private onGoToSelect?: () => void,
     private onBackToMenu?: () => void,
-    private onToggleMute?: () => boolean
+    private onToggleMute?: () => boolean,
+    private onToggleSkillTree?: () => void,
+    private onUnlockSkill?: (id: SkillNodeId) => void
   ) {
     this.root = document.getElementById('ui-root')!;
   }
@@ -104,6 +106,14 @@ export class HUDManager {
       if (this.lastPhase !== 'paused') {
         this.lastPhase = 'paused';
         this.renderPause(state);
+      }
+      return;
+    }
+
+    if (state.phase === 'skill_tree') {
+      if (this.lastPhase !== 'skill_tree') {
+        this.lastPhase = 'skill_tree';
+        this.renderSkillTree(state);
       }
       return;
     }
@@ -268,6 +278,7 @@ export class HUDManager {
               <div class="floor-sub" id="hud-stats">Kills: 0 &bull; Gold: 0</div>
             </div>
             <button id="btn-pause" class="class-tab interactive" style="padding:10px 14px;font-size:12px">ESC Menu</button>
+            <button id="btn-skills" class="class-tab interactive" style="padding:10px 14px;font-size:12px;border-color:rgba(250,204,21,0.45);color:#fde047">[K] Skills (<span id="hud-sp">${state.skillPoints}</span> SP)</button>
           </div>
 
           <div class="boss-bar-wrap" id="boss-wrap" style="display:none">
@@ -297,8 +308,13 @@ export class HUDManager {
                 <div class="s-name">${cls.skillName}</div>
                 <div class="cd-overlay" id="cd-skill" style="display:none"></div>
               </div>
+              <div class="skill-slot" id="slot-skill2">
+                <div class="s-key">C / 2</div>
+                <div class="s-name" id="name-skill2">${state.unlockedSkills.includes('unlock_skill2') ? cls.skill2Name : 'Locked ([K])'}</div>
+                <div class="cd-overlay" id="cd-skill2" style="display:none"></div>
+              </div>
               <div class="skill-slot">
-                <div class="s-key">R / 2</div>
+                <div class="s-key">R / 3</div>
                 <div class="s-name">${cls.ultName}</div>
                 <div class="cd-overlay" id="cd-ult" style="display:none"></div>
               </div>
@@ -315,6 +331,7 @@ export class HUDManager {
       </div>
     `;
     document.getElementById('btn-pause')?.addEventListener('click', () => this.onTogglePause?.());
+    document.getElementById('btn-skills')?.addEventListener('click', () => this.onToggleSkillTree?.());
   }
 
   private updatePlayingValues(state: HUDState): void {
@@ -322,7 +339,30 @@ export class HUDManager {
     if (floorEl) floorEl.textContent = `Floor ${state.floor} — ${state.currentRoomType.toUpperCase()}`;
 
     const statsEl = document.getElementById('hud-stats');
-    if (statsEl) statsEl.textContent = `Kills: ${state.kills}  •  Gold: ${state.gold}`;
+    if (statsEl) statsEl.textContent = `Lv.${state.level} (${state.xp}/${state.xpToNext} XP)  •  Kills: ${state.kills}  •  Gold: ${state.gold}`;
+
+    const spEl = document.getElementById('hud-sp');
+    if (spEl) spEl.textContent = String(state.skillPoints);
+
+    const skill2Unlocked = state.unlockedSkills.includes('unlock_skill2');
+    const nameSkill2 = document.getElementById('name-skill2');
+    if (nameSkill2) {
+      nameSkill2.textContent = skill2Unlocked ? HERO_CLASSES[state.selectedClass].skill2Name : 'Locked ([K])';
+      nameSkill2.style.opacity = skill2Unlocked ? '1' : '0.5';
+    }
+
+    const cdSkill2 = document.getElementById('cd-skill2');
+    if (cdSkill2) {
+      if (!skill2Unlocked) {
+        cdSkill2.style.display = 'flex';
+        cdSkill2.textContent = 'LOCK';
+      } else if (state.skill2Cd > 0.05) {
+        cdSkill2.style.display = 'flex';
+        cdSkill2.textContent = `${state.skill2Cd.toFixed(1)}s`;
+      } else {
+        cdSkill2.style.display = 'none';
+      }
+    }
 
     const hpText = document.getElementById('hud-hp-text');
     const hpFill = document.getElementById('hud-hp-fill');
@@ -477,6 +517,69 @@ export class HUDManager {
       this.onUISelect?.();
       this.onRestart();
     });
+  }
+
+  public refreshSkillTree(state: HUDState): void {
+    this.renderSkillTree(state);
+  }
+
+  private renderSkillTree(state: HUDState): void {
+    const cls = HERO_CLASSES[state.selectedClass];
+    const branches: Array<'Combat' | 'Arcane' | 'Vanguard'> = ['Combat', 'Arcane', 'Vanguard'];
+    this.root.innerHTML = `
+      <div class="modal-backdrop interactive">
+        <div class="modal-title">${cls.name} Skill Tree</div>
+        <div style="font-size:14px;color:var(--muted);margin-bottom:8px">
+          Level <strong style="color:#fff">${state.level}</strong> (${state.xp}/${state.xpToNext} XP) &bull; Available Skill Points:
+          <strong style="color:#fde047">${state.skillPoints} SP</strong>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3,minmax(210px,250px));gap:16px;margin:10px 0 18px">
+          ${branches
+            .map((branch) => {
+              const nodes = SKILL_TREE_NODES.filter((n) => n.branch === branch);
+              return `
+                <div style="background:rgba(16,14,24,0.88);border:1px solid rgba(255,255,255,0.12);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:12px">
+                  <div style="font-size:13px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:${cls.accentHex};text-align:center">${branch}</div>
+                  ${nodes
+                    .map((n) => {
+                      const unlocked = state.unlockedSkills.includes(n.id);
+                      const reqMet = !n.requires || state.unlockedSkills.includes(n.requires);
+                      const canUnlock = !unlocked && reqMet && state.skillPoints > 0;
+                      const desc =
+                        n.id === 'unlock_skill2'
+                          ? `Unlocks [C] ${cls.skill2Name}: ${cls.skill2Desc}`
+                          : n.desc;
+                      const border = unlocked
+                        ? 'rgba(52,211,153,0.75)'
+                        : canUnlock
+                        ? 'rgba(250,204,21,0.75)'
+                        : 'rgba(255,255,255,0.1)';
+                      return `
+                        <button class="relic-card skill-node-btn" data-node="${n.id}" ${canUnlock ? '' : 'disabled'}
+                          style="text-align:left;padding:12px;border-color:${border};opacity:${unlocked || canUnlock ? '1' : '0.55'};cursor:${canUnlock ? 'pointer' : 'default'}">
+                          <span class="r-tag">${unlocked ? 'UNLOCKED' : `TIER ${n.tier} • 1 SP`}</span>
+                          <span class="r-name" style="font-size:14px">${n.name}</span>
+                          <span class="r-desc" style="font-size:12px">${desc}</span>
+                        </button>
+                      `;
+                    })
+                    .join('')}
+                </div>
+              `;
+            })
+            .join('')}
+        </div>
+        <button class="start-btn" id="btn-close-skills" style="padding:11px 28px;font-size:14px">Resume ([K] / ESC)</button>
+      </div>
+    `;
+
+    this.root.querySelectorAll('.skill-node-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = (btn as HTMLElement).dataset.node as SkillNodeId;
+        this.onUnlockSkill?.(id);
+      });
+    });
+    document.getElementById('btn-close-skills')?.addEventListener('click', () => this.onToggleSkillTree?.());
   }
 
   private renderDeath(state: HUDState): void {
