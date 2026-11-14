@@ -242,6 +242,84 @@ export class VFXManager {
     this.falling.push({ mesh, target: target.clone(), velY: isMeteor ? -34 : -42, color: colorHex, isMeteor, onImpact });
   }
 
+  private getBrackeysTex(key: 'fire_orb' | 'flame' | 'flare' | 'magic_rune' | 'ring'): THREE.Texture {
+    const cacheKey = `brackeys_${key}`;
+    let tex = this.sheetCache.get(cacheKey);
+    if (!tex) {
+      tex = this.texLoader.load(`./assets/vfx/vfx_${key}.png`);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      this.sheetCache.set(cacheKey, tex);
+    }
+    return tex;
+  }
+
+  public createMagicOrb(colorHex: number, isFireball = false): THREE.Group {
+    const grp = new THREE.Group();
+    const core = new THREE.Mesh(
+      new THREE.SphereGeometry(isFireball ? 0.24 : 0.14, 12, 12),
+      new THREE.MeshBasicMaterial({ color: 0xffffff })
+    );
+    grp.add(core);
+
+    const outerTex = this.getBrackeysTex(isFireball ? 'fire_orb' : 'magic_rune');
+    const outer = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: outerTex,
+        color: colorHex,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    );
+    outer.scale.setScalar(isFireball ? 2.1 : 1.25);
+    grp.add(outer);
+
+    const flare = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: this.getBrackeysTex('flare'),
+        color: isFireball ? 0xffdd88 : colorHex,
+        transparent: true,
+        opacity: 0.9,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    );
+    flare.scale.setScalar(isFireball ? 1.55 : 0.95);
+    grp.add(flare);
+
+    return grp;
+  }
+
+  public spawnBrackeysBurst(
+    pos: THREE.Vector3,
+    texKey: 'fire_orb' | 'flame' | 'flare' | 'magic_rune' | 'ring',
+    colorHex: number,
+    scale = 1.1,
+    life = 0.28
+  ): void {
+    const mat = new THREE.MeshBasicMaterial({
+      map: this.getBrackeysTex(texKey),
+      color: colorHex,
+      transparent: true,
+      opacity: 0.9,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(scale, scale), mat);
+    mesh.position.copy(pos);
+    mesh.rotation.set(-Math.PI / 3, Math.random() * Math.PI * 2, 0);
+    this.scene.add(mesh);
+    this.particles.push({
+      mesh,
+      vel: new THREE.Vector3((Math.random() - 0.5) * 0.9, 0.7, (Math.random() - 0.5) * 0.9),
+      life,
+      maxLife: life,
+      gravity: 0,
+      spin: new THREE.Vector3(0, 0, 3.5),
+    });
+  }
+
   public spawnTrailSpark(pos: THREE.Vector3, colorHex: number, scale = 0.7): void {
     const mat = new THREE.MeshBasicMaterial({
       color: colorHex,

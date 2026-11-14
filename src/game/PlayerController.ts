@@ -547,15 +547,15 @@ export class PlayerController {
     if (kind === 'arrow') {
       const grp = new THREE.Group();
       const arrowModel = this.assets.cloneProp('weapons/arrow_bow.gltf');
-      arrowModel.rotation.x = Math.PI / 2;
-      arrowModel.scale.setScalar(1.35);
+      arrowModel.scale.setScalar(1.45);
       grp.add(arrowModel);
       grp.rotation.y = Math.atan2(vel.x, vel.z);
       mesh = grp;
+    } else if (kind === 'magic') {
+      mesh = this.vfx.createMagicOrb(color, explosiveRadius > 0);
     } else {
       const mat = new THREE.MeshBasicMaterial({ color });
       mesh = new THREE.Mesh(this.projGeo, mat);
-      if (explosiveRadius > 0) mesh.scale.setScalar(1.75);
     }
     mesh.position.copy(pos);
     this.scene.add(mesh);
@@ -583,7 +583,17 @@ export class PlayerController {
       p.trailTimer -= dt;
       if (p.trailTimer <= 0) {
         p.trailTimer = p.kind === 'arrow' ? 0.035 : 0.028;
-        this.vfx.spawnTrailSpark(p.mesh.position, p.color, p.explosiveRadius > 0 ? 1.25 : 0.65);
+        if (p.kind === 'magic') {
+          this.vfx.spawnBrackeysBurst(
+            p.mesh.position,
+            p.explosiveRadius > 0 ? 'flame' : 'magic_rune',
+            p.color,
+            p.explosiveRadius > 0 ? 1.35 : 0.85,
+            0.24
+          );
+        } else {
+          this.vfx.spawnTrailSpark(p.mesh.position, p.color, 0.65);
+        }
       }
 
       const wallHit = !dungeon.isWalkable(p.mesh.position.x, p.mesh.position.z, 0.15);
