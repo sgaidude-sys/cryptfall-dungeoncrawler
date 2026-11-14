@@ -82,7 +82,9 @@ export class PlayerController {
     this.hp = this.maxHp;
 
     this.mesh = this.assets.cloneCharacter(this.def.modelFile);
-    this.assets.attachToHand(this.mesh, this.def.rightWeapon, 'right');
+    if (this.def.rightWeapon) {
+      this.assets.attachToHand(this.mesh, this.def.rightWeapon, 'right');
+    }
     if (this.def.leftWeapon) {
       this.assets.attachToHand(this.mesh, this.def.leftWeapon, 'left');
     }
@@ -198,7 +200,7 @@ export class PlayerController {
       this.whirlwindTick -= dt;
       this.mesh.rotation.y += dt * 16;
       this.anim.clearOneShot();
-      this.anim.playLoop('Melee_2H_Attack_Spinning', 0.05, 1.85);
+      this.anim.playLoop('Melee_2H_Attack_Spin', 0.05, 1.65);
       if (this.whirlwindTick <= 0) {
         this.whirlwindTick = 0.22;
         this.sound.playAxeThud(0.85);
@@ -540,7 +542,7 @@ export class PlayerController {
     } else if (this.def.id === 'barbarian') {
       // Bloodlust Tempest: 2.5s spinning whirlwind
       this.anim.clearOneShot();
-      this.anim.playLoop('Melee_2H_Attack_Spinning', 0.05, 1.85);
+      this.anim.playLoop('Melee_2H_Attack_Spin', 0.05, 1.65);
       this.whirlwindTimer = 2.5;
       this.whirlwindTick = 0.05;
       this.vfx.spawnRing(this.pos, 3.8, 0xf97316, 0.45);

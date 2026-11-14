@@ -6,7 +6,7 @@ export interface HeroClassDef {
   role: string;
   modelFile: string;
   textureFile: string;
-  rightWeapon: string;
+  rightWeapon?: string;
   leftWeapon?: string;
   maxHp: number;
   speed: number;

@@ -126,7 +126,7 @@ export const HERO_CLASSES: Record<HeroClassId, HeroClassDef> = {
     role: 'Marksman Hunter',
     modelFile: 'characters/Ranger.glb',
     textureFile: 'characters/ranger_texture.png',
-    rightWeapon: 'weapons/pack_bow_golden.glb',
+    leftWeapon: 'weapons/pack_bow_golden.glb',
     maxHp: 115,
     speed: 7.2,
     damage: 23,

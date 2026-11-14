@@ -263,16 +263,7 @@ export class AssetManager {
     const weapon = this.cloneProp(weaponPath);
     const isPack = weaponPath.startsWith('weapons/pack_');
     weapon.scale.setScalar(isPack ? 1.05 : weaponPath.includes('shield') ? 1.25 : 1.45);
-    if (isPack) {
-      if (weaponPath.includes('bow')) {
-        weapon.rotation.set(Math.PI * 0.5, 0, 0);
-      } else if (weaponPath.includes('shield')) {
-        weapon.rotation.set(Math.PI * 0.5, 0, Math.PI * 0.5);
-      } else {
-        // pack_* melee blades/axes/daggers/scythe extend along -Z in glTF; rotate PI around Y so they point +Z forward/outward
-        weapon.rotation.set(0.22, Math.PI, hand === 'right' ? 0.15 : -0.15);
-      }
-    } else if (weaponPath.includes('bow_withString')) {
+    if (weaponPath.includes('bow')) {
       weapon.rotation.set(0, Math.PI * 0.5, 0);
     } else if (weaponPath.includes('shield')) {
       weapon.rotation.set(0, Math.PI * 0.5, 0);

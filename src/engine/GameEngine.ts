@@ -163,7 +163,7 @@ export class GameEngine {
     }
     const cls = HERO_CLASSES[id];
     const model = this.assets.cloneCharacter(cls.modelFile);
-    this.assets.attachToHand(model, cls.rightWeapon, 'right');
+    if (cls.rightWeapon) this.assets.attachToHand(model, cls.rightWeapon, 'right');
     if (cls.leftWeapon) this.assets.attachToHand(model, cls.leftWeapon, 'left');
     model.position.set(1.8, 0, 0);
     model.scale.setScalar(1.3);
