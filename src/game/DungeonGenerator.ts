@@ -456,10 +456,10 @@ export class DungeonFloorBuilder {
     return true;
   }
 
-  public getRoomAt(x: number, z: number): RoomData | null {
+  public getRoomAt(x: number, z: number, margin = 0): RoomData | null {
     for (const r of this.rooms) {
-      const hw = (r.widthTiles * TILE) / 2;
-      const hd = (r.depthTiles * TILE) / 2;
+      const hw = (r.widthTiles * TILE) / 2 - margin;
+      const hd = (r.depthTiles * TILE) / 2 - margin;
       if (Math.abs(x - r.worldX) <= hw && Math.abs(z - r.worldZ) <= hd) {
         return r;
       }

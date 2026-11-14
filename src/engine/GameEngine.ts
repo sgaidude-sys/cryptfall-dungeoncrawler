@@ -288,18 +288,19 @@ export class GameEngine {
       this.dungeon.update(dt, elapsed);
       this.sound.update(rawDt);
 
-      // Room discovery & combat triggers
+      // Room discovery & combat triggers (only lock gates once player is 1.8m inside the room)
       const room = this.dungeon.getRoomAt(this.player.pos.x, this.player.pos.z);
       if (room) {
         room.discovered = true;
-        if (!room.cleared && this.activeRoom !== room && (room.type === 'combat' || room.type === 'boss' || room.type === 'trap')) {
-          this.activeRoom = room;
-          this.dungeon.gatesLocked = true;
-          this.dungeon.lockedRoom = room;
-          this.enemies.spawnWaveForRoom(room, this.floor);
-          this.sound.setCombatIntensity(room.type === 'boss' ? 1.0 : 0.75);
-          if (room.type === 'boss') this.showBanner('Boss Chamber — Dread Bone Colossus');
-        }
+      }
+      const interiorRoom = this.dungeon.getRoomAt(this.player.pos.x, this.player.pos.z, 1.8);
+      if (interiorRoom && !interiorRoom.cleared && this.activeRoom !== interiorRoom && (interiorRoom.type === 'combat' || interiorRoom.type === 'boss' || interiorRoom.type === 'trap')) {
+        this.activeRoom = interiorRoom;
+        this.dungeon.gatesLocked = true;
+        this.dungeon.lockedRoom = interiorRoom;
+        this.enemies.spawnWaveForRoom(interiorRoom, this.floor);
+        this.sound.setCombatIntensity(interiorRoom.type === 'boss' ? 1.0 : 0.75);
+        if (interiorRoom.type === 'boss') this.showBanner('Boss Chamber — Dread Bone Colossus');
       }
 
       // Check room clear
