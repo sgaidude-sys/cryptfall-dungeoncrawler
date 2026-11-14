@@ -303,7 +303,8 @@ export class PlayerController {
 
     const combo = this.attackComboIdx++;
     const clip = this.def.attackClips[combo % this.def.attackClips.length];
-    this.anim.playOneShot(clip, 0.05, 1.35 * atkSpdMult, Math.min(0.28, this.attackCd * 0.85));
+    const swingSpeed = (this.def.id === 'rogue' ? 2.6 : this.def.id === 'barbarian' ? 1.85 : 2.15) * atkSpdMult;
+    this.anim.playOneShot(clip, 0.04, swingSpeed);
 
     const forward = new THREE.Vector3(Math.sin(this.aimYaw), 0, Math.cos(this.aimYaw));
     if (!this.def.isRanged) {
