@@ -197,6 +197,8 @@ export class PlayerController {
       this.whirlwindTimer -= dt;
       this.whirlwindTick -= dt;
       this.mesh.rotation.y += dt * 16;
+      this.anim.clearOneShot();
+      this.anim.playLoop('Melee_2H_Attack_Spinning', 0.05, 1.85);
       if (this.whirlwindTick <= 0) {
         this.whirlwindTick = 0.22;
         this.sound.playAxeThud(0.85);
@@ -289,16 +291,18 @@ export class PlayerController {
         const vx = (moveInput.x / moveLen) * spd;
         const vz = (moveInput.y / moveLen) * spd;
         this.tryMove(vx * dt, vz * dt, dungeon);
-        this.mesh.rotation.y = attackHeld ? this.aimYaw : Math.atan2(vx, vz);
-        this.mesh.rotation.x = THREE.MathUtils.lerp(this.mesh.rotation.x, 0.14, Math.min(1, dt * 10));
-        this.anim.playLoop(this.def.runClip, 0.12, 1.1);
+        if (this.whirlwindTimer <= 0) {
+          this.mesh.rotation.y = attackHeld ? this.aimYaw : Math.atan2(vx, vz);
+          this.mesh.rotation.x = THREE.MathUtils.lerp(this.mesh.rotation.x, 0.14, Math.min(1, dt * 10));
+          this.anim.playLoop(this.def.runClip, 0.12, 1.1);
+        }
 
         this.footstepTimer -= dt;
         if (this.footstepTimer <= 0) {
           this.footstepTimer = 0.28;
           this.sound.playFootstep();
         }
-      } else {
+      } else if (this.whirlwindTimer <= 0) {
         this.mesh.rotation.y = this.aimYaw;
         this.mesh.rotation.x = THREE.MathUtils.lerp(this.mesh.rotation.x, 0, Math.min(1, dt * 10));
         this.anim.playLoop('Idle_A', 0.14);
@@ -535,7 +539,8 @@ export class PlayerController {
       }
     } else if (this.def.id === 'barbarian') {
       // Bloodlust Tempest: 2.5s spinning whirlwind
-      this.anim.playOneShot('Melee_2H_Attack_Spinning', 0.05, 1.4, 2.5);
+      this.anim.clearOneShot();
+      this.anim.playLoop('Melee_2H_Attack_Spinning', 0.05, 1.85);
       this.whirlwindTimer = 2.5;
       this.whirlwindTick = 0.05;
       this.vfx.spawnRing(this.pos, 3.8, 0xf97316, 0.45);
