@@ -263,24 +263,30 @@ export class HUDManager {
             </div>
             <div class="ability-list">
               <div class="ability-item"><strong>[LMB] ${cls.primaryName}:</strong> ${cls.primaryDesc}</div>
-              <div class="ability-item"><strong>[RMB / Q] ${cls.skillName}:</strong> ${cls.skillDesc}</div>
-              <div class="ability-item"><strong>[R / 2] ${cls.ultName}:</strong> ${cls.ultDesc}</div>
+              ${CLASS_SKILL_TREES[selected]
+                .slice(0, 4)
+                .map((skillId, idx) => {
+                  const s = RO_SKILLS[skillId];
+                  const key = idx === 0 ? 'Q / 1' : idx === 1 ? 'C / 2' : idx === 2 ? 'R / 3' : 'V / 4';
+                  return `<div class="ability-item"><strong>[${key}] ${s.name}:</strong> ${s.desc(3)}</div>`;
+                })
+                .join('')}
               <div class="ability-item"><strong>[Space] Dodge Roll:</strong> Evade with invulnerability frames.</div>
             </div>
           </div>
 
-          <button class="start-btn" id="btn-descend">Enter the Crypt</button>
+          <button class="start-btn" id="btn-descend">Enter Oakhaven Town</button>
         </div>
 
         <div class="controls-hint">
           <span><span class="kbd">WASD</span> Move</span>
-          <span><span class="kbd">Mouse</span> Aim</span>
           <span><span class="kbd">LMB</span> Attack</span>
-          <span><span class="kbd">RMB / Q</span> Skill</span>
-          <span><span class="kbd">R</span> Ultimate</span>
+          <span><span class="kbd">Q/C/R/V</span> Skills</span>
+          <span><span class="kbd">5/6</span> Potions</span>
+          <span><span class="kbd">U</span> Stats</span>
+          <span><span class="kbd">K</span> Skill Tree</span>
           <span><span class="kbd">Space</span> Dodge</span>
           <span><span class="kbd">E</span> Interact</span>
-          <span><span class="kbd">ESC</span> Pause</span>
         </div>
       </div>
     `;

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { AssetManager } from '../assets/AssetManager';
+import { AnimatorHelper } from '../engine/AnimatorHelper';
 import { RoomData, TownNpcId } from '../types';
 
 export const TILE = 4.0;
@@ -53,6 +54,7 @@ export class DungeonFloorBuilder {
   public interactables: Interactable[] = [];
   private torches: TorchLight[] = [];
   private doorGates: THREE.Object3D[] = [];
+  private npcAnimators: AnimatorHelper[] = [];
   public gatesLocked = false;
   public lockedRoom: RoomData | null = null;
   private gateLerp = 0;
@@ -272,6 +274,8 @@ export class DungeonFloorBuilder {
     const npcs: Array<{
       npcId: TownNpcId;
       model: string;
+      rightWeapon?: string;
+      leftWeapon?: string;
       prop?: string;
       x: number;
       z: number;
@@ -282,7 +286,8 @@ export class DungeonFloorBuilder {
     }> = [
       {
         npcId: 'blacksmith',
-        model: 'Barbarian.glb',
+        model: 'characters/Barbarian.glb',
+        rightWeapon: 'weapons/pack_hammer_double.glb',
         prop: 'props_fantasy/Anvil.gltf',
         x: -7.5,
         z: -5.5,
@@ -293,7 +298,8 @@ export class DungeonFloorBuilder {
       },
       {
         npcId: 'kafra',
-        model: 'Ranger.glb',
+        model: 'characters/Ranger.glb',
+        leftWeapon: 'weapons/pack_bow_golden.glb',
         prop: 'dungeon/chest_rare.gltf.glb',
         x: 7.5,
         z: -5.5,
@@ -304,7 +310,8 @@ export class DungeonFloorBuilder {
       },
       {
         npcId: 'hypnotist',
-        model: 'Mage.glb',
+        model: 'characters/Mage.glb',
+        rightWeapon: 'weapons/staff.gltf',
         prop: 'props_fantasy/BookStand.gltf',
         x: -7.5,
         z: 5.5,
@@ -315,7 +322,8 @@ export class DungeonFloorBuilder {
       },
       {
         npcId: 'alchemist',
-        model: 'Rogue.glb',
+        model: 'characters/Rogue_Hooded.glb',
+        rightWeapon: 'weapons/pack_dagger.glb',
         prop: 'props_fantasy/Cauldron.gltf',
         x: 7.5,
         z: 5.5,
@@ -326,7 +334,9 @@ export class DungeonFloorBuilder {
       },
       {
         npcId: 'guildmaster',
-        model: 'Knight.glb',
+        model: 'characters/Knight.glb',
+        rightWeapon: 'weapons/pack_sword_golden.glb',
+        leftWeapon: 'weapons/pack_shield_celtic.glb',
         prop: 'props_fantasy/Banner_1.gltf',
         x: 0,
         z: -8.5,
@@ -339,9 +349,15 @@ export class DungeonFloorBuilder {
 
     for (const n of npcs) {
       const charMesh = this.assets.cloneCharacter(n.model);
+      if (n.rightWeapon) this.assets.attachToHand(charMesh, n.rightWeapon, 'right');
+      if (n.leftWeapon) this.assets.attachToHand(charMesh, n.leftWeapon, 'left');
       charMesh.position.set(n.x, 0, n.z);
       charMesh.rotation.y = n.ry;
       this.group.add(charMesh);
+
+      const npcAnim = new AnimatorHelper(charMesh, this.assets);
+      npcAnim.playLoop('Idle_A', 0.1);
+      this.npcAnimators.push(npcAnim);
 
       const labelSprite = this.createNpcLabelSprite(n.tag, n.color);
       labelSprite.position.set(n.x, 2.75, n.z);
@@ -710,6 +726,9 @@ export class DungeonFloorBuilder {
   }
 
   public update(dt: number, elapsed: number): void {
+    for (const anim of this.npcAnimators) {
+      anim.update(dt);
+    }
     // Flicker wall torches
     for (const t of this.torches) {
       const f = Math.sin(elapsed * 9.5 + t.seed) * 0.12 + Math.sin(elapsed * 23 + t.seed * 2) * 0.06;
@@ -751,6 +770,7 @@ export class DungeonFloorBuilder {
     this.interactables = [];
     this.torches = [];
     this.doorGates = [];
+    this.npcAnimators = [];
     this.gatesLocked = false;
     this.lockedRoom = null;
     this.gateLerp = 1;
