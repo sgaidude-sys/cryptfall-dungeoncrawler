@@ -86,6 +86,7 @@ export class AssetManager {
       'animations/Rig_Medium_CombatMelee.glb',
       'animations/Rig_Medium_CombatRanged.glb',
       'animations/Rig_Medium_Special.glb',
+      'animations/Rig_Medium_UAL2.glb',
     ];
 
     const textures = [

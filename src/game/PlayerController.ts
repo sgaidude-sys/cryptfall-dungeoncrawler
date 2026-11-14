@@ -380,7 +380,7 @@ export class PlayerController {
 
     if (this.def.id === 'knight') {
       // Aegis Judgment: Heal +25, 2s i-frames, 5m consecrated pillar + lightning smite
-      this.anim.playOneShot('Melee_1H_Attack_Jump_Chop', 0.05, 1.15, 0.45);
+      this.anim.playOneShot('UAL2_Shield_OneShot', 0.04, 1.15, 0.45);
       this.heal(25);
       this.iFrames = Math.max(this.iFrames, 2.0);
       this.sound.playExplosion();
@@ -460,7 +460,7 @@ export class PlayerController {
     if (this.def.id === 'knight') {
       // Shield Bash: forward dash + 3.2m AoE stun 1.8s
       const startPos = this.pos.clone();
-      this.anim.playOneShot('Melee_Block_Attack', 0.05, 1.3, 0.35);
+      this.anim.playOneShot('UAL2_Shield_Dash', 0.04, 1.25, 0.35);
       this.sound.playAxeThud(1.2);
       this.iFrames = Math.max(this.iFrames, 0.3);
       for (let s = 0; s < 6; s++) this.tryMove(forward.x * 0.55, forward.z * 0.55, dungeon);
@@ -498,7 +498,7 @@ export class PlayerController {
     } else if (this.def.id === 'rogue') {
       // Shadow Dash backstab
       const startPos = this.pos.clone();
-      this.anim.playOneShot('Melee_Dualwield_Attack_Stab', 0.05, 1.6, 0.3);
+      this.anim.playOneShot('UAL2_Sword_Dash', 0.04, 1.5, 0.3);
       this.sound.playDodge();
       this.iFrames = Math.max(this.iFrames, 0.35);
       this.vfx.spawnBurst(this.pos, 0x34d399, 12, 4);
