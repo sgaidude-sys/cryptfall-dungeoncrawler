@@ -186,24 +186,55 @@ export class SoundEngine {
     if (!this.ctx || !this.masterGain) return;
     const ctx = this.ctx;
     const now = ctx.currentTime;
-    const pitch = 0.88 + Math.random() * 0.28;
+    const pitch = 0.90 + Math.random() * 0.22;
 
-    // Metallic ring partials
-    for (const ratio of [1, 2.32, 3.71]) {
-      const osc = ctx.createOscillator();
+    // 1. Air-cutting steel whoosh (swept bandpass noise)
+    if (this.noiseBuffer) {
+      const src = ctx.createBufferSource();
+      src.buffer = this.noiseBuffer;
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.Q.value = 1.6;
+      bp.frequency.setValueAtTime(360 * pitch, now);
+      bp.frequency.exponentialRampToValueAtTime(1650 * pitch, now + 0.045);
+      bp.frequency.exponentialRampToValueAtTime(420 * pitch, now + 0.13);
       const g = ctx.createGain();
-      osc.type = ratio === 1 ? 'triangle' : 'sine';
-      osc.frequency.setValueAtTime(620 * ratio * pitch, now);
-      osc.frequency.exponentialRampToValueAtTime(420 * ratio * pitch, now + 0.18);
-      g.gain.setValueAtTime((0.16 / ratio) * velocity, now);
-      g.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
-      osc.connect(g);
+      g.gain.setValueAtTime(0.001, now);
+      g.gain.linearRampToValueAtTime(0.32 * velocity, now + 0.025);
+      g.gain.exponentialRampToValueAtTime(0.001, now + 0.14);
+      src.connect(bp);
+      bp.connect(g);
       g.connect(this.masterGain);
-      osc.start(now);
-      osc.stop(now + 0.23);
+      src.start(now);
+      src.stop(now + 0.15);
     }
 
-    this.playNoiseBurst(0.08, 2200 * pitch, 'bandpass', 0.18 * velocity);
+    // 2. Subtle low-end blade weight thump
+    const body = ctx.createOscillator();
+    const bodyG = ctx.createGain();
+    body.type = 'sine';
+    body.frequency.setValueAtTime(125 * pitch, now);
+    body.frequency.exponentialRampToValueAtTime(44, now + 0.09);
+    bodyG.gain.setValueAtTime(0.22 * velocity, now);
+    bodyG.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+    body.connect(bodyG);
+    bodyG.connect(this.masterGain);
+    body.start(now);
+    body.stop(now + 0.11);
+
+    // 3. Crisp high-frequency steel edge shimmer (short, non-beepy)
+    for (const freq of [1920, 2870, 4150]) {
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq * pitch, now + 0.01);
+      g.gain.setValueAtTime(0.032 * velocity, now + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0008, now + 0.09);
+      osc.connect(g);
+      g.connect(this.masterGain);
+      osc.start(now + 0.01);
+      osc.stop(now + 0.1);
+    }
   }
 
   public playAxeThud(velocity = 1): void {
