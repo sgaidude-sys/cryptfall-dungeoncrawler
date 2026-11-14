@@ -7,6 +7,8 @@ export class HUDManager {
   private lastPhase = '';
   private lastClass: HeroClassId | '' = '';
   private minimapCanvas: HTMLCanvasElement | null = null;
+  private showingCodex = false;
+  private isMuted = false;
 
   constructor(
     private onSelectClass: (id: HeroClassId) => void,
@@ -17,7 +19,10 @@ export class HUDManager {
     private onUISelect?: () => void,
     private onUIPopup?: () => void,
     private onTogglePause?: () => void,
-    private onRestartRun?: () => void
+    private onRestartRun?: () => void,
+    private onGoToSelect?: () => void,
+    private onBackToMenu?: () => void,
+    private onToggleMute?: () => boolean
   ) {
     this.root = document.getElementById('ui-root')!;
   }
@@ -70,6 +75,14 @@ export class HUDManager {
   public render(state: HUDState, rooms: RoomData[], playerPos: { x: number; z: number }): void {
     if (state.phase === 'loading' || state.phase === 'relic_draft') return;
 
+    if (state.phase === 'menu') {
+      if (this.lastPhase !== 'menu') {
+        this.lastPhase = 'menu';
+        this.renderMainMenu();
+      }
+      return;
+    }
+
     if (state.phase === 'title') {
       if (this.lastPhase !== 'title' || this.lastClass !== state.selectedClass) {
         this.lastPhase = 'title';
@@ -106,13 +119,79 @@ export class HUDManager {
     this.drawMinimap(rooms, playerPos);
   }
 
+  private renderMainMenu(): void {
+    this.root.innerHTML = `
+      <div class="title-screen interactive" style="justify-content:center;align-items:center;text-align:center;background:radial-gradient(circle at center, rgba(12,10,18,0.55) 0%, rgba(6,5,10,0.9) 100%)">
+        <div style="display:flex;flex-direction:column;align-items:center;gap:22px;max-width:460px;width:100%">
+          <div class="title-header">
+            <h1 style="font-size:64px">CRYPTFALL</h1>
+            <p>3D Dungeon Crawler Roguelite</p>
+          </div>
+
+          <div style="display:flex;flex-direction:column;gap:12px;width:280px;margin-top:8px">
+            <button class="start-btn" id="btn-menu-play">New Expedition</button>
+            <button class="class-tab" id="btn-menu-codex" style="padding:13px;font-size:14px">Controls &amp; Relics</button>
+            <button class="class-tab" id="btn-menu-audio" style="padding:13px;font-size:14px">Audio: ${this.isMuted ? 'Off' : 'On'}</button>
+          </div>
+        </div>
+
+        ${
+          this.showingCodex
+            ? `
+          <div class="modal-backdrop interactive">
+            <div class="modal-title" style="font-size:26px">Controls &amp; Relics</div>
+            <div class="class-card" style="max-width:520px;text-align:left;line-height:1.6;font-size:13px">
+              <div><strong>Movement:</strong> <span class="kbd">WASD</span> / Arrow Keys &bull; <strong>Aim:</strong> Mouse Cursor</div>
+              <div><strong>Primary Attack:</strong> <span class="kbd">LMB</span> &bull; <strong>Dodge Roll (i-frames):</strong> <span class="kbd">Space</span> / <span class="kbd">Shift</span></div>
+              <div><strong>Active Skill:</strong> <span class="kbd">RMB</span> / <span class="kbd">Q</span> / <span class="kbd">1</span> &bull; <strong>Ultimate:</strong> <span class="kbd">R</span> / <span class="kbd">2</span></div>
+              <div><strong>Interact (Chests / Shrines / Trapdoor):</strong> <span class="kbd">E</span> &bull; <strong>Pause:</strong> <span class="kbd">ESC</span></div>
+              <hr style="border:none;border-top:1px solid var(--border);margin:10px 0" />
+              <div style="color:var(--muted)">Clear rooms to unlock iron gates and spawn Chests &amp; Relic Shrines offering 3 run-altering blessings. Defeat each floor's Dread Bone Colossus to descend deeper.</div>
+            </div>
+            <button class="start-btn" id="btn-codex-close">Close</button>
+          </div>
+        `
+            : ''
+        }
+      </div>
+    `;
+
+    const bindHover = (id: string) => document.getElementById(id)?.addEventListener('mouseenter', () => this.onUIHover?.());
+    bindHover('btn-menu-play');
+    bindHover('btn-menu-codex');
+    bindHover('btn-menu-audio');
+
+    document.getElementById('btn-menu-play')?.addEventListener('click', () => {
+      this.onUISelect?.();
+      this.onGoToSelect?.();
+    });
+    document.getElementById('btn-menu-codex')?.addEventListener('click', () => {
+      this.onUISelect?.();
+      this.showingCodex = true;
+      this.renderMainMenu();
+    });
+    document.getElementById('btn-codex-close')?.addEventListener('click', () => {
+      this.onUISelect?.();
+      this.showingCodex = false;
+      this.renderMainMenu();
+    });
+    document.getElementById('btn-menu-audio')?.addEventListener('click', () => {
+      this.isMuted = this.onToggleMute?.() ?? !this.isMuted;
+      this.onUISelect?.();
+      this.renderMainMenu();
+    });
+  }
+
   private renderTitle(selected: HeroClassId): void {
     const cls = HERO_CLASSES[selected];
     this.root.innerHTML = `
       <div class="title-screen interactive">
-        <div class="title-header">
-          <h1>CRYPTFALL</h1>
-          <p>3D Dungeon Crawler Roguelite</p>
+        <div class="title-header" style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div>
+            <h1>CRYPTFALL</h1>
+            <p>Choose Your Hero</p>
+          </div>
+          <button class="class-tab" id="btn-back-menu" style="padding:10px 16px;font-size:12px">&larr; Main Menu</button>
         </div>
 
         <div class="class-panel">
@@ -171,6 +250,10 @@ export class HUDManager {
     document.getElementById('btn-descend')?.addEventListener('click', () => {
       this.onUISelect?.();
       this.onStartGame();
+    });
+    document.getElementById('btn-back-menu')?.addEventListener('click', () => {
+      this.onUISelect?.();
+      this.onBackToMenu?.();
     });
   }
 

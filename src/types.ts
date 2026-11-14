@@ -63,7 +63,7 @@ export interface RoomData {
   doors: { n?: boolean; s?: boolean; e?: boolean; w?: boolean };
 }
 
-export type GamePhase = 'loading' | 'title' | 'playing' | 'paused' | 'relic_draft' | 'dead';
+export type GamePhase = 'loading' | 'menu' | 'title' | 'playing' | 'paused' | 'relic_draft' | 'dead';
 
 export interface HUDState {
   phase: GamePhase;

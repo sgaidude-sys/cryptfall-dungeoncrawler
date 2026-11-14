@@ -110,7 +110,22 @@ export class GameEngine {
       () => { this.sound.unlock(); this.sound.playUISelect(); },
       () => this.sound.playUIPopup(),
       () => this.togglePause(),
-      () => this.startRun()
+      () => this.startRun(),
+      () => {
+        this.phase = 'title';
+        this.selectPreviewClass(this.selectedClass);
+      },
+      () => {
+        this.phase = 'menu';
+        if (this.previewModel) {
+          this.scene.remove(this.previewModel);
+          this.previewModel = null;
+        }
+      },
+      () => {
+        this.sound.unlock();
+        return this.sound.toggleMute();
+      }
     );
 
     this.bindInputs();
@@ -119,8 +134,9 @@ export class GameEngine {
   public async init(): Promise<void> {
     this.hud.showLoading(0, 'Preparing dungeon assets...');
     await this.assets.preloadAll((pct, label) => this.hud.showLoading(pct, label));
-    this.phase = 'title';
-    this.setupTitleShowcase();
+    this.phase = 'menu';
+    this.dungeon.clear();
+    this.dungeon.generate(1);
     this.loop(performance.now());
   }
 
@@ -196,8 +212,12 @@ export class GameEngine {
   }
 
   private returnToTitle(): void {
-    this.phase = 'title';
+    this.phase = 'menu';
     this.setupTitleShowcase();
+    if (this.previewModel) {
+      this.scene.remove(this.previewModel);
+      this.previewModel = null;
+    }
   }
 
   private buildFloor(floorNum: number): void {
@@ -284,6 +304,16 @@ export class GameEngine {
     if (this.bannerTimer > 0) {
       this.bannerTimer -= rawDt;
       if (this.bannerTimer <= 0) this.bannerText = null;
+    }
+
+    if (this.phase === 'menu') {
+      this.dungeon.update(rawDt, elapsed);
+      const ang = elapsed * 0.18;
+      this.camera.position.set(Math.sin(ang) * 9, 6.5, Math.cos(ang) * 9);
+      this.camera.lookAt(0, 1.2, 0);
+      this.composer.render();
+      this.hud.render(this.buildHudState(null), this.dungeon.rooms, { x: 0, z: 0 });
+      return;
     }
 
     if (this.phase === 'title') {
