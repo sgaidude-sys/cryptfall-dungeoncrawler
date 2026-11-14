@@ -319,12 +319,14 @@ export class EnemyManager {
         continue;
       }
 
-      // Procedural hover/hop for Bestiary monsters
+      // Procedural hover/hop & banking for Bestiary monsters
       const tNow = performance.now() * 0.001 + e.id;
       if (e.kind === 'imp') {
-        e.pos.y = 0.72 + Math.sin(tNow * 5.2) * 0.18;
+        e.pos.y = 0.78 + Math.sin(tNow * 5.4) * 0.20;
+        e.mesh.rotation.z = Math.sin(tNow * 3.8) * 0.16;
       } else if (e.kind === 'puglin') {
-        e.pos.y = e.state === 'chase' ? Math.abs(Math.sin(tNow * 11.5)) * 0.34 : 0;
+        e.pos.y = e.state === 'chase' ? Math.abs(Math.sin(tNow * 11.5)) * 0.38 : 0;
+        e.mesh.rotation.z = e.state === 'chase' ? Math.sin(tNow * 11.5) * 0.12 : 0;
       }
 
       const toPlayer = new THREE.Vector3().subVectors(playerPos, e.pos);

@@ -569,3 +569,80 @@ html, body, #app {
   line-height: 1.45;
   color: #d6d0c4;
 }
+
+/* Cinematic Cutscene Letterbox */
+.cutscene-overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 60;
+}
+
+.letterbox-top, .letterbox-bottom {
+  position: fixed;
+  left: 0;
+  right: 0;
+  height: 11vh;
+  background: #040307;
+  transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.letterbox-top { top: 0; transform: translateY(-100%); border-bottom: 1px solid rgba(234, 179, 84, 0.28); }
+.letterbox-bottom { bottom: 0; transform: translateY(100%); border-top: 1px solid rgba(234, 179, 84, 0.28); }
+.cutscene-overlay.open .letterbox-top,
+.cutscene-overlay.open .letterbox-bottom {
+  transform: translateY(0);
+}
+
+.cutscene-caption {
+  position: fixed;
+  bottom: 14vh;
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+  opacity: 0;
+  transition: opacity 0.6s ease 0.2s;
+}
+.cutscene-overlay.open .cutscene-caption {
+  opacity: 1;
+}
+
+.cutscene-title {
+  font-size: 34px;
+  font-weight: 900;
+  letter-spacing: 0.16em;
+  color: var(--gold-bright);
+  text-transform: uppercase;
+  text-shadow: 0 4px 24px rgba(0, 0, 0, 0.95), 0 0 24px rgba(234, 179, 84, 0.55);
+}
+
+.cutscene-sub {
+  margin-top: 4px;
+  font-size: 14px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #d8d0c4;
+  text-shadow: 0 2px 10px #000;
+}
+
+.cutscene-skip {
+  position: fixed;
+  bottom: 3.5vh;
+  right: 28px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.weapon-badge {
+  width: 48px;
+  height: 24px;
+  background-image: url('./assets/ui/weapons_sheet.png');
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+  transform: scale(1.35);
+  transform-origin: left center;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.9));
+}

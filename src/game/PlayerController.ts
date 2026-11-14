@@ -208,6 +208,7 @@ export class PlayerController {
         const vz = (moveInput.y / moveLen) * spd;
         this.tryMove(vx * dt, vz * dt, dungeon);
         this.mesh.rotation.y = attackHeld ? this.aimYaw : Math.atan2(vx, vz);
+        this.mesh.rotation.x = THREE.MathUtils.lerp(this.mesh.rotation.x, 0.14, Math.min(1, dt * 10));
         this.anim.playLoop(this.def.runClip, 0.12, 1.1);
 
         this.footstepTimer -= dt;
@@ -217,6 +218,7 @@ export class PlayerController {
         }
       } else {
         this.mesh.rotation.y = this.aimYaw;
+        this.mesh.rotation.x = THREE.MathUtils.lerp(this.mesh.rotation.x, 0, Math.min(1, dt * 10));
         this.anim.playLoop('Idle_A', 0.14);
       }
 

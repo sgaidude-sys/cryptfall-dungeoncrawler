@@ -15,6 +15,7 @@ import { HUDManager } from '../ui/HUD';
 import { GamePhase, HeroClassId, HUDState, RelicDef, RoomData } from '../types';
 import { VFXManager } from './VFXManager';
 import { AnimatorHelper } from './AnimatorHelper';
+import { CutsceneManager } from './CutsceneManager';
 
 export class GameEngine {
   private renderer: THREE.WebGLRenderer;
@@ -28,6 +29,7 @@ export class GameEngine {
   private dungeon: DungeonFloorBuilder;
   private enemies: EnemyManager;
   private hud: HUDManager;
+  private cutscenes = new CutsceneManager();
 
   private player: PlayerController | null = null;
   private previewModel: THREE.Group | null = null;
@@ -160,7 +162,19 @@ export class GameEngine {
     this.player = new PlayerController(this.selectedClass, this.scene, this.assets, this.vfx, this.sound);
     this.buildFloor(1);
     this.phase = 'playing';
-    this.showBanner('Floor 1 — The Outer Crypt');
+    this.player.anim.playOneShot('Spawn_Ground', 0.05, 1.0, 1.1);
+    this.sound.setMusicMode('explore');
+    this.sound.playCinematicWhoosh();
+    this.cutscenes.play({
+      duration: 2.9,
+      startPos: new THREE.Vector3(0, 19, 21),
+      endPos: new THREE.Vector3(0, 14.5, 11.5),
+      startLook: new THREE.Vector3(0, 1.8, -3),
+      endLook: new THREE.Vector3(0, 0.8, 0),
+      title: 'Floor 1 — The Outer Crypt',
+      subtitle: 'Seek the Relic Shrines. Vanquish the Dread Colossus.',
+      onComplete: () => this.showBanner('Floor 1 — The Outer Crypt'),
+    });
   }
 
   private returnToTitle(): void {
@@ -204,6 +218,10 @@ export class GameEngine {
 
     window.addEventListener('keydown', (e) => {
       const k = e.key.toLowerCase();
+      if (this.cutscenes.active && (k === ' ' || k === 'escape')) {
+        this.cutscenes.skip();
+        return;
+      }
       this.keys.add(k);
       if (k === 'q') this.skillQueued = true;
       if (k === ' ' || k === 'shift') this.dodgeQueued = true;
@@ -259,6 +277,17 @@ export class GameEngine {
     }
 
     if (this.phase === 'playing' && this.player) {
+      if (this.cutscenes.active) {
+        this.player.anim.update(rawDt);
+        this.enemies.enemies.forEach((e) => e.anim?.update(rawDt));
+        this.dungeon.update(rawDt, elapsed);
+        this.sound.update(rawDt);
+        this.vfx.update(rawDt, this.camera);
+        this.cutscenes.update(rawDt, this.camera);
+        this.composer.render();
+        return;
+      }
+
       const dt = this.vfx.isHitStopped(rawDt) ? rawDt * 0.05 : rawDt;
 
       // Update aim world point
@@ -303,7 +332,26 @@ export class GameEngine {
         this.dungeon.lockedRoom = interiorRoom;
         this.enemies.spawnWaveForRoom(interiorRoom, this.floor);
         this.sound.setCombatIntensity(interiorRoom.type === 'boss' ? 1.0 : 0.75);
-        if (interiorRoom.type === 'boss') this.showBanner('Boss Chamber — Dread Bone Colossus');
+        if (interiorRoom.type === 'boss') {
+          this.sound.setMusicMode('boss');
+          this.sound.playCinematicWhoosh();
+          const boss = this.enemies.getActiveBoss();
+          if (boss) {
+            boss.anim?.clearOneShot();
+            boss.anim?.playOneShot('Skeletons_Taunt_Longer', 0.08, 1.05, 2.5);
+            this.vfx.spawnRing(boss.pos, 6.0, 0xff2244, 0.7);
+            this.cutscenes.play({
+              duration: 3.1,
+              startPos: new THREE.Vector3(this.player.pos.x, 12, this.player.pos.z + 10),
+              endPos: new THREE.Vector3(boss.pos.x, 5.2, boss.pos.z + 7.5),
+              startLook: this.player.pos.clone(),
+              endLook: boss.pos.clone().add(new THREE.Vector3(0, 1.8, 0)),
+              title: 'Dread Bone Colossus',
+              subtitle: `Warden of Floor ${this.floor}`,
+              onComplete: () => this.showBanner('Boss Chamber — Dread Bone Colossus'),
+            });
+          }
+        }
       }
 
       // Check room clear
@@ -312,6 +360,7 @@ export class GameEngine {
         this.dungeon.gatesLocked = false;
         this.dungeon.lockedRoom = null;
         this.sound.setCombatIntensity(0.15);
+        this.sound.setMusicMode('explore');
         this.sound.playChestChime();
 
         if (this.activeRoom.type === 'boss') {

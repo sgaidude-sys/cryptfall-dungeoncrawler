@@ -114,8 +114,13 @@ export class HUDManager {
           </div>
 
           <div class="class-card">
-            <h2>${cls.name}</h2>
-            <div class="class-role">${cls.role}</div>
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <div>
+                <h2>${cls.name}</h2>
+                <div class="class-role">${cls.role}</div>
+              </div>
+              <div class="weapon-badge" style="background-position:0 -${HERO_CLASS_ORDER.indexOf(selected) * 24}px"></div>
+            </div>
             <div class="stat-grid">
               <div class="stat-box"><div class="lbl">HP</div><div class="val">${cls.maxHp}</div></div>
               <div class="stat-box"><div class="lbl">Damage</div><div class="val">${cls.damage}</div></div>
@@ -183,8 +188,8 @@ export class HUDManager {
 
         <div class="hud-bottom">
           <div class="player-bars">
-            <div class="hp-row">
-              <span>${cls.name}</span>
+            <div class="hp-row" style="align-items:center">
+              <span style="display:flex;align-items:center;gap:8px"><span class="weapon-badge" style="width:28px;transform:scale(1);background-position:0 -${HERO_CLASS_ORDER.indexOf(state.selectedClass) * 24}px"></span>${cls.name}</span>
               <span id="hud-hp-text">${state.hp} / ${state.maxHp}</span>
             </div>
             <div class="hp-track"><div class="hp-fill" id="hud-hp-fill" style="width:100%"></div></div>
