@@ -83,7 +83,31 @@ export interface SkillNodeDef {
   requires?: SkillNodeId;
 }
 
-export type GamePhase = 'loading' | 'menu' | 'title' | 'playing' | 'paused' | 'relic_draft' | 'skill_tree' | 'dead';
+import type { BaseStats, DerivedROStats } from './game/RagnarokStatsSystem';
+import type { ROSkillId } from './game/SkillSystem';
+
+export type TownNpcId = 'blacksmith' | 'kafra' | 'hypnotist' | 'alchemist' | 'guildmaster';
+
+export interface KafraItem {
+  id: string;
+  name: string;
+  desc: string;
+  icon: string;
+  bonusStat?: keyof BaseStats;
+  bonusAmt?: number;
+}
+
+export type GamePhase =
+  | 'loading'
+  | 'menu'
+  | 'title'
+  | 'playing'
+  | 'paused'
+  | 'relic_draft'
+  | 'skill_tree'
+  | 'stats_window'
+  | 'npc_modal'
+  | 'dead';
 
 export interface HUDState {
   phase: GamePhase;
@@ -98,12 +122,30 @@ export interface HUDState {
   selectedClass: HeroClassId;
   hp: number;
   maxHp: number;
+  sp: number;
+  maxSp: number;
+  statPoints: number;
+  roSkillPoints: number;
+  roBase: BaseStats;
+  roDerived: DerivedROStats;
+  roSkills: Record<ROSkillId, number>;
+  castingSkillName: string | null;
+  castProgress: number;
+  weaponRefine: number;
+  armorRefine: number;
+  redPotions: number;
+  bluePotions: number;
+  kafraStorage: KafraItem[];
+  equippedCard: KafraItem | null;
+  activeNpc: TownNpcId | null;
   skillCd: number;
   skillMaxCd: number;
   skill2Cd: number;
   skill2MaxCd: number;
   ultCd: number;
   ultMaxCd: number;
+  skill4Cd: number;
+  skill4MaxCd: number;
   dodgeCd: number;
   dodgeMaxCd: number;
   relics: RelicId[];
@@ -114,4 +156,8 @@ export interface HUDState {
   interactPrompt: string | null;
   bannerText: string | null;
   currentRoomType: RoomType;
+  energyCoatActive: boolean;
+  endureTimer: number;
+  magnumEndowTimer: number;
+  quickenTimer: number;
 }

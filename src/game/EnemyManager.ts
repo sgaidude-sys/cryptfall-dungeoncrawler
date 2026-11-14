@@ -4,6 +4,7 @@ import { AnimatorHelper } from '../engine/AnimatorHelper';
 import { VFXManager } from '../engine/VFXManager';
 import { SoundEngine } from '../audio/SoundEngine';
 import { DungeonFloorBuilder } from './DungeonGenerator';
+import { ElementType } from './RagnarokStatsSystem';
 import { RoomData } from '../types';
 
 export type EnemyKind =
@@ -18,6 +19,9 @@ export type EnemyKind =
   | 'mushroom'
   | 'ghost'
   | 'slime'
+  | 'pyre_skeleton'
+  | 'frost_wraith'
+  | 'toxic_ghoul'
   | 'dragon'
   | 'boss';
 
@@ -54,6 +58,10 @@ export interface Enemy {
   stateTimer: number;
   stunTimer: number;
   chillTimer: number;
+  freezeTimer: number;
+  baseElement: ElementType;
+  element: ElementType;
+  flee: number;
   telegraphMesh: THREE.Mesh | null;
   phase2Triggered: boolean;
   dead: boolean;
@@ -91,8 +99,10 @@ export class EnemyManager {
 
     const count = room.type === 'trap' ? 3 : 4 + Math.min(4, floorNum);
     const pool: EnemyKind[] =
-      floorNum >= 2
-        ? ['warrior', 'minion', 'rogue', 'mage', 'imp', 'puglin', 'orc', 'slime', 'mushroom', 'ghost', 'demon']
+      floorNum >= 3
+        ? ['warrior', 'pyre_skeleton', 'demon', 'orc', 'frost_wraith', 'ghost', 'mage', 'imp']
+        : floorNum === 2
+        ? ['toxic_ghoul', 'mushroom', 'slime', 'frost_wraith', 'ghost', 'orc', 'rogue', 'puglin']
         : ['warrior', 'minion', 'rogue', 'mage', 'imp', 'puglin', 'orc', 'slime', 'mushroom'];
     for (let i = 0; i < count; i++) {
       const kind = pool[Math.floor(Math.random() * pool.length)];
@@ -242,7 +252,51 @@ export class EnemyManager {
         rad: 0.62,
         s: 0.72,
         name: 'Venom Slime',
+        element: 'poison1' as ElementType,
         anims: { idle: 'Idle', move: 'Walk', attack: 'Bite_Front', hit: 'HitRecieve', death: 'Death' },
+      },
+      pyre_skeleton: {
+        model: 'characters/Skeleton_Warrior.glb',
+        rWep: 'weapons/Skeleton_Blade.gltf',
+        lWep: undefined,
+        hp: 110,
+        speed: 3.8,
+        dmg: 18,
+        range: 2.4,
+        rad: 0.68,
+        s: 1.08,
+        name: 'Pyre Skeleton',
+        element: 'fire1' as ElementType,
+        tint: 0xff6b22,
+      },
+      frost_wraith: {
+        model: 'monsters/Ghost_Skull.gltf',
+        rWep: undefined,
+        lWep: undefined,
+        hp: 78,
+        speed: 4.5,
+        dmg: 15,
+        range: 2.3,
+        rad: 0.6,
+        s: 0.85,
+        name: 'Frost Wraith',
+        element: 'water1' as ElementType,
+        tint: 0x38bdf8,
+        anims: { idle: 'Flying_Idle', move: 'Fast_Flying', attack: 'Headbutt', hit: 'HitReact', death: 'Death' },
+      },
+      toxic_ghoul: {
+        model: 'characters/Skeleton_Minion.glb',
+        rWep: 'weapons/Skeleton_Axe.gltf',
+        lWep: undefined,
+        hp: 84,
+        speed: 4.2,
+        dmg: 15,
+        range: 2.2,
+        rad: 0.6,
+        s: 1.0,
+        name: 'Toxic Ghoul',
+        element: 'poison1' as ElementType,
+        tint: 0x4ade80,
       },
       dragon: {
         model: 'monsters/Dragon_Evolved.gltf',
@@ -275,9 +329,20 @@ export class EnemyManager {
 
     const mesh = this.assets.cloneCharacter(cfg.model);
     mesh.scale.setScalar(cfg.s);
-    mesh.position.set(x, kind === 'imp' ? 0.75 : kind === 'ghost' || kind === 'dragon' ? 0.45 : 0, z);
+    mesh.position.set(x, kind === 'imp' ? 0.75 : kind === 'ghost' || kind === 'frost_wraith' || kind === 'dragon' ? 0.45 : 0, z);
     if (cfg.rWep) this.assets.attachToHand(mesh, cfg.rWep, 'right');
     if (cfg.lWep) this.assets.attachToHand(mesh, cfg.lWep, 'left');
+
+    if ('tint' in cfg && cfg.tint) {
+      mesh.traverse((obj) => {
+        if (obj instanceof THREE.Mesh && obj.material instanceof THREE.MeshStandardMaterial) {
+          const cloned = obj.material.clone();
+          cloned.emissive = new THREE.Color(cfg.tint);
+          cloned.emissiveIntensity = 0.45;
+          obj.material = cloned;
+        }
+      });
+    }
 
     if (kind === 'boss' || kind === 'dragon') {
       const aura = new THREE.PointLight(kind === 'dragon' ? 0xff7722 : 0xff3344, 18, 12);
@@ -318,6 +383,7 @@ export class EnemyManager {
     }
 
     const isBoss = 'isBoss' in cfg && Boolean(cfg.isBoss);
+    const baseElement: ElementType = 'element' in cfg && cfg.element ? cfg.element : kind === 'dragon' || kind === 'demon' || kind === 'imp' ? 'fire1' : 'undead1';
 
     const enemy: Enemy = {
       id: this.nextId++,
@@ -337,6 +403,10 @@ export class EnemyManager {
       stateTimer: 0,
       stunTimer: 0,
       chillTimer: 0,
+      freezeTimer: 0,
+      baseElement,
+      element: baseElement,
+      flee: isBoss ? 195 : 165 + Math.round(scale * 12),
       telegraphMesh: null,
       phase2Triggered: false,
       dead: false,
@@ -352,10 +422,35 @@ export class EnemyManager {
     return enemy;
   }
 
-  public damageEnemy(enemy: Enemy, amount: number, knockDir: THREE.Vector3, isCrit = false, stunSec = 0): boolean {
+  public freezeEnemy(enemy: Enemy, seconds: number): void {
+    if (enemy.dead || enemy.isBoss) return;
+    enemy.freezeTimer = Math.max(enemy.freezeTimer, seconds);
+    enemy.element = 'water1';
+    this.clearTelegraph(enemy);
+    enemy.mesh.traverse((obj) => {
+      if (obj instanceof THREE.Mesh && obj.material instanceof THREE.MeshStandardMaterial) {
+        const cloned = obj.material.clone();
+        cloned.emissive = new THREE.Color(0x38bdf8);
+        cloned.emissiveIntensity = 0.85;
+        cloned.color.lerp(new THREE.Color(0x99f6e4), 0.55);
+        obj.material = cloned;
+      }
+    });
+  }
+
+  public damageEnemy(
+    enemy: Enemy,
+    amount: number,
+    knockDir: THREE.Vector3,
+    isCrit = false,
+    stunSec = 0,
+    skipPopup = false
+  ): boolean {
     if (enemy.dead) return false;
     enemy.hp -= amount;
-    this.vfx.spawnDamageNumber(enemy.pos, amount, isCrit ? 'crit' : 'normal');
+    if (!skipPopup) {
+      this.vfx.spawnDamageNumber(enemy.pos, amount, isCrit ? 'crit' : 'normal');
+    }
     this.vfx.spawnBurst(enemy.pos.clone().add(new THREE.Vector3(0, 1, 0)), isCrit ? 0xffd54f : 0xff6b6b, isCrit ? 12 : 6, 4.5);
 
     const kb = enemy.isBoss ? 3.2 : isCrit ? 9.5 : 6.8;
@@ -393,6 +488,22 @@ export class EnemyManager {
       enemy.anim?.playOneShot(enemy.anims.hit, 0.05, 1.4, 0.22);
     }
     return false;
+  }
+
+  /** Provoke all nearby enemies into chasing the player (Knight Provoke). */
+  public provokeAllNear(pos: THREE.Vector3, radius: number): number {
+    let count = 0;
+    const rSq = radius * radius;
+    for (const e of this.enemies) {
+      if (e.dead || e.freezeTimer > 0) continue;
+      if (e.pos.distanceToSquared(pos) <= rSq) {
+        e.state = 'chase';
+        e.stateTimer = 0.1;
+        this.vfx.spawnROText(e.pos.clone().add(new THREE.Vector3(0, 2.2, 0)), 'PROVOKE!', 'guard');
+        count++;
+      }
+    }
+    return count;
   }
 
   public update(
@@ -443,6 +554,20 @@ export class EnemyManager {
 
       if (e.chillTimer > 0) e.chillTimer -= dt;
       const spdMult = e.chillTimer > 0 ? 0.55 : 1.0;
+
+      if (e.freezeTimer > 0) {
+        e.freezeTimer -= dt;
+        if (e.freezeTimer <= 0) {
+          e.element = e.baseElement;
+          e.mesh.traverse((obj) => {
+            if (obj instanceof THREE.Mesh && obj.material instanceof THREE.MeshStandardMaterial) {
+              obj.material.emissiveIntensity = 0.0;
+              obj.material.color.setHex(0xffffff);
+            }
+          });
+        }
+        continue;
+      }
 
       if (e.stunTimer > 0) {
         e.stunTimer -= dt;

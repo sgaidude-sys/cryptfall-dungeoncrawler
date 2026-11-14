@@ -12,7 +12,9 @@ import { PlayerController } from '../game/PlayerController';
 import { HERO_CLASSES } from '../game/classes';
 import { pickRandomRelics } from '../game/relics';
 import { HUDManager } from '../ui/HUD';
-import { GamePhase, HeroClassId, HUDState, RelicDef, RoomData, SkillNodeId } from '../types';
+import { GamePhase, HeroClassId, HUDState, KafraItem, RelicDef, RoomData, SkillNodeId, TownNpcId } from '../types';
+import type { StatKey } from '../game/RagnarokStatsSystem';
+import type { ROSkillId } from '../game/SkillSystem';
 import { VFXManager } from './VFXManager';
 import { AnimatorHelper } from './AnimatorHelper';
 import { CutsceneManager } from './CutsceneManager';
@@ -37,7 +39,8 @@ export class GameEngine {
 
   private phase: GamePhase = 'loading';
   private selectedClass: HeroClassId = 'knight';
-  private floor = 1;
+  private floor = 0;
+  private activeNpc: TownNpcId | null = null;
   private activeRoom: RoomData | null = null;
   private bannerText: string | null = null;
   private bannerTimer = 0;
@@ -52,6 +55,7 @@ export class GameEngine {
   private skillQueued = false;
   private skill2Queued = false;
   private ultQueued = false;
+  private skill4Queued = false;
   private dodgeQueued = false;
   private interactQueued = false;
   private lastTime = performance.now();
@@ -130,6 +134,91 @@ export class GameEngine {
       () => this.toggleSkillTree(),
       (id) => this.unlockSkillNode(id)
     );
+
+    this.hud.setROCallbacks({
+      onToggleStats: () => this.toggleStatsWindow(),
+      onAllocateStat: (stat: StatKey) => {
+        if (this.player?.roStats.allocateStat(stat)) {
+          this.player.getDerived();
+          this.sound.playUIPopup();
+        }
+      },
+      onUpgradeROSkill: (id: ROSkillId) => {
+        if (this.player?.roSkills.upgradeSkill(id)) {
+          this.sound.playUIPopup();
+        }
+      },
+      onRefineWeapon: () => {
+        if (!this.player) return;
+        const next = this.player.roStats.weaponRefine + 1;
+        const cost = next * 60;
+        if (next <= 10 && this.player.gold >= cost) {
+          this.player.gold -= cost;
+          this.player.roStats.weaponRefine = next;
+          this.player.updateWeaponRefineVisuals();
+          this.sound.playSwordClang(1.3);
+          this.showBanner(`Weapon Refined to +${next}!`);
+        }
+      },
+      onRefineArmor: () => {
+        if (!this.player) return;
+        const next = this.player.roStats.armorRefine + 1;
+        const cost = next * 50;
+        if (next <= 10 && this.player.gold >= cost) {
+          this.player.gold -= cost;
+          this.player.roStats.armorRefine = next;
+          this.sound.playSwordClang(1.1);
+          this.showBanner(`Armor Refined to +${next}!`);
+        }
+      },
+      onResetStats: () => {
+        if (!this.player) return;
+        this.player.roStats.resetStats();
+        this.player.getDerived();
+        this.sound.playUIPopup();
+        this.showBanner('Stats Reset by Hypnotist!');
+      },
+      onResetSkills: () => {
+        if (!this.player) return;
+        this.player.roSkills.resetSkills();
+        this.sound.playUIPopup();
+        this.showBanner('Skills Reset by Hypnotist!');
+      },
+      onBuyPotion: (kind: 'red' | 'blue') => {
+        if (!this.player) return;
+        const cost = kind === 'red' ? 25 : 40;
+        if (this.player.gold >= cost) {
+          this.player.gold -= cost;
+          if (kind === 'red') this.player.redPotions++;
+          else this.player.bluePotions++;
+          this.sound.playUIPopup();
+        }
+      },
+      onEquipCard: (card: KafraItem | null) => {
+        this.player?.equipKafraCard(card);
+        this.sound.playUIPopup();
+      },
+      onCloseModal: () => {
+        this.activeNpc = null;
+        if (this.phase === 'npc_modal' || this.phase === 'stats_window' || this.phase === 'skill_tree') {
+          this.phase = 'playing';
+        }
+      },
+      onUseRedPotion: () => this.player?.useRedPotion(),
+      onUseBluePotion: () => this.player?.useBluePotion(),
+      onEnterDungeon: () => {
+        this.activeNpc = null;
+        this.phase = 'playing';
+        this.buildFloor(1);
+        this.showBanner('Floor 1 — Sunken Crypt');
+      },
+      onReturnToTown: () => {
+        this.activeNpc = null;
+        this.phase = 'playing';
+        this.buildFloor(0);
+        this.showBanner('Oakhaven Town Hub');
+      },
+    });
 
     this.bindInputs();
   }
@@ -213,25 +302,26 @@ export class GameEngine {
       this.previewModel = null;
       this.previewAnim = null;
     }
-    this.floor = 1;
+    this.floor = 0;
     this.player = new PlayerController(this.selectedClass, this.scene, this.assets, this.vfx, this.sound);
+    this.player.gold = 250;
     this.player.onLevelUp = (lvl) => {
-      this.showBanner(`LEVEL ${lvl}! +1 SKILL POINT — PRESS [K]`);
+      this.showBanner(`LEVEL ${lvl}! [U] Stats & [K] Skills`);
     };
-    this.buildFloor(1);
+    this.buildFloor(0);
     this.phase = 'playing';
     this.player.anim.playOneShot('Spawn_Ground', 0.05, 1.0, 1.1);
     this.sound.setMusicMode('explore');
     this.sound.playCinematicWhoosh();
     this.cutscenes.play({
-      duration: 2.9,
-      startPos: new THREE.Vector3(0, 19, 21),
+      duration: 2.4,
+      startPos: new THREE.Vector3(0, 18, 20),
       endPos: new THREE.Vector3(0, 14.5, 11.5),
       startLook: new THREE.Vector3(0, 1.8, -3),
       endLook: new THREE.Vector3(0, 0.8, 0),
-      title: 'Floor 1 — The Outer Crypt',
-      subtitle: 'Seek the Relic Shrines. Vanquish the Dread Colossus.',
-      onComplete: () => this.showBanner('Floor 1 — The Outer Crypt'),
+      title: 'Oakhaven Town Hub',
+      subtitle: 'Visit Blacksmith, Kafra, Alchemist — or speak to the Guild Master to enter the Crypt.',
+      onComplete: () => this.showBanner('Oakhaven Town — Press [U] Stats | [K] Skills'),
     });
   }
 
@@ -249,10 +339,34 @@ export class GameEngine {
     this.enemies.clear();
     this.dungeon.generate(floorNum);
     this.activeRoom = null;
+    if (floorNum === 0) {
+      this.scene.background = new THREE.Color(0x141726);
+      this.scene.fog = new THREE.FogExp2(0x141726, 0.014);
+    } else if (floorNum === 1) {
+      this.scene.background = new THREE.Color(0x09080d);
+      this.scene.fog = new THREE.FogExp2(0x09080d, 0.022);
+    } else if (floorNum === 2) {
+      this.scene.background = new THREE.Color(0x091612);
+      this.scene.fog = new THREE.FogExp2(0x091612, 0.022);
+    } else {
+      this.scene.background = new THREE.Color(0x150818);
+      this.scene.fog = new THREE.FogExp2(0x150818, 0.023);
+    }
     if (this.player) {
       this.player.pos.set(0, 0, 0);
     }
     this.sound.setCombatIntensity(0.1);
+  }
+
+  private toggleStatsWindow(): void {
+    if (this.phase === 'playing') {
+      this.phase = 'stats_window';
+      this.attackHeld = false;
+      this.sound.playUIPopup();
+    } else if (this.phase === 'stats_window') {
+      this.phase = 'playing';
+      this.sound.playUISelect();
+    }
   }
 
   private showBanner(text: string): void {
@@ -284,18 +398,32 @@ export class GameEngine {
         this.cutscenes.skip();
         return;
       }
-      if (k === 'escape' && (this.phase === 'playing' || this.phase === 'paused' || this.phase === 'skill_tree')) {
-        this.togglePause();
+      if (k === 'escape' && (this.phase === 'playing' || this.phase === 'paused' || this.phase === 'skill_tree' || this.phase === 'stats_window' || this.phase === 'npc_modal')) {
+        if (this.phase === 'stats_window' || this.phase === 'npc_modal') {
+          this.activeNpc = null;
+          this.phase = 'playing';
+        } else {
+          this.togglePause();
+        }
         return;
       }
-      if (k === 'k' && (this.phase === 'playing' || this.phase === 'skill_tree')) {
+      if ((k === 'k' || (e.altKey && k === 's')) && (this.phase === 'playing' || this.phase === 'skill_tree')) {
+        e.preventDefault();
         this.toggleSkillTree();
+        return;
+      }
+      if ((k === 'u' || (e.altKey && k === 'a')) && (this.phase === 'playing' || this.phase === 'stats_window')) {
+        e.preventDefault();
+        this.toggleStatsWindow();
         return;
       }
       this.keys.add(k);
       if (k === 'q' || k === '1') this.skillQueued = true;
       if (k === 'c' || k === '2') this.skill2Queued = true;
       if (k === 'r' || k === '3') this.ultQueued = true;
+      if (k === 'v' || k === '4') this.skill4Queued = true;
+      if (k === '5') this.player?.useRedPotion();
+      if (k === '6') this.player?.useBluePotion();
       if (k === ' ' || k === 'shift') this.dodgeQueued = true;
       if (k === 'e' || k === 'f') this.interactQueued = true;
       if (k === 'm') this.sound.toggleMute();
@@ -392,15 +520,17 @@ export class GameEngine {
         this.ultQueued,
         this.dodgeQueued,
         this.dungeon,
-        this.enemies
+        this.enemies,
+        this.skill4Queued
       );
       this.skillQueued = false;
       this.skill2Queued = false;
       this.ultQueued = false;
+      this.skill4Queued = false;
       this.dodgeQueued = false;
 
       this.enemies.update(dt, this.player.pos, this.dungeon, (dmg, dir) => {
-        this.player?.takeDamage(dmg, dir);
+        this.player?.takeDamage(dmg, dir, this.enemies);
       });
 
       this.dungeon.update(dt, elapsed);
@@ -515,6 +645,15 @@ export class GameEngine {
 
   private handleInteract(item: Interactable): void {
     if (!this.player) return;
+
+    if (item.kind === 'npc' && item.npcId) {
+      this.activeNpc = item.npcId;
+      this.phase = 'npc_modal';
+      this.attackHeld = false;
+      this.sound.playUIPopup();
+      return;
+    }
+
     item.used = true;
     if (item.light) item.light.intensity = 1.5;
 
@@ -532,13 +671,24 @@ export class GameEngine {
     } else if (item.kind === 'trapdoor') {
       this.sound.playChestChime();
       this.buildFloor(this.floor + 1);
-      this.showBanner(`Floor ${this.floor} — Deeper into the Abyss`);
+      const biomeName =
+        this.floor === 1
+          ? 'Floor 1 — Sunken Crypt'
+          : this.floor === 2
+            ? 'Floor 2 — Overgrown Subterranean Ruins'
+            : `Floor ${this.floor} — Obsidian Spire Core`;
+      this.showBanner(biomeName);
     }
   }
 
   private buildHudState(nearest: Interactable | null): HUDState {
     const boss = this.enemies.getActiveBoss();
     const room = this.player ? this.dungeon.getRoomAt(this.player.pos.x, this.player.pos.z) : null;
+    const derived = this.player?.getDerived();
+    const roSkillsRecord = this.player
+      ? (Object.fromEntries(this.player.roSkills.levels.entries()) as HUDState['roSkills'])
+      : ({} as HUDState['roSkills']);
+
     return {
       phase: this.phase,
       floor: this.floor,
@@ -552,12 +702,54 @@ export class GameEngine {
       selectedClass: this.selectedClass,
       hp: this.player?.hp ?? 0,
       maxHp: this.player?.maxHp ?? 100,
+      sp: this.player?.sp ?? 0,
+      maxSp: this.player?.maxSp ?? 100,
+      statPoints: this.player?.roStats.statPoints ?? 0,
+      roSkillPoints: this.player?.roSkills.skillPoints ?? 0,
+      roBase: this.player?.roStats.base ?? { str: 5, agi: 5, vit: 5, int: 5, dex: 5, luk: 5 },
+      roDerived: derived ?? {
+        total: { str: 5, agi: 5, vit: 5, int: 5, dex: 5, luk: 5 },
+        bonus: { str: 0, agi: 0, vit: 0, int: 0, dex: 0, luk: 0 },
+        atkMin: 10,
+        atkMax: 14,
+        matkMin: 10,
+        matkMax: 14,
+        hardDef: 0,
+        softDef: 4,
+        mdef: 5,
+        hit: 10,
+        flee: 10,
+        perfectDodge: 0.01,
+        critChance: 0.05,
+        aspd: 156,
+        attackInterval: 0.5,
+        castTimeMult: 1,
+        maxHp: 150,
+        maxSp: 100,
+        potionMult: 1,
+        hpRegenPerTick: 4,
+        spRegenPerTick: 4,
+      },
+      roSkills: roSkillsRecord,
+      castingSkillName: this.player?.castingSkill?.name ?? null,
+      castProgress: this.player?.castingSkill
+        ? 1 - this.player.castingSkill.timer / Math.max(0.01, this.player.castingSkill.total)
+        : 0,
+      weaponRefine: this.player?.roStats.weaponRefine ?? 0,
+      armorRefine: this.player?.roStats.armorRefine ?? 0,
+      redPotions: this.player?.redPotions ?? 0,
+      bluePotions: this.player?.bluePotions ?? 0,
+      kafraStorage: this.player?.kafraStorage ?? [],
+      equippedCard: this.player?.equippedCard ?? null,
+      activeNpc: this.activeNpc,
       skillCd: this.player?.skillCd ?? 0,
       skillMaxCd: this.player?.def.skillCooldown ?? 1,
       skill2Cd: this.player?.skill2Cd ?? 0,
       skill2MaxCd: this.player?.def.skill2Cooldown ?? 1,
       ultCd: this.player?.ultCd ?? 0,
       ultMaxCd: this.player?.def.ultCooldown ?? 1,
+      skill4Cd: this.player?.skill4Cd ?? 0,
+      skill4MaxCd: 10,
       dodgeCd: this.player?.dodgeCd ?? 0,
       dodgeMaxCd: this.player?.dodgeMaxCd ?? 1,
       relics: this.player?.relics ?? [],
@@ -568,6 +760,10 @@ export class GameEngine {
       interactPrompt: nearest ? nearest.label : null,
       bannerText: this.bannerText,
       currentRoomType: room?.type ?? 'start',
+      energyCoatActive: this.player?.roStats.energyCoatActive ?? false,
+      endureTimer: this.player?.roStats.endureTimer ?? 0,
+      magnumEndowTimer: this.player?.roStats.magnumEndowTimer ?? 0,
+      quickenTimer: this.player?.roStats.quickenTimer ?? 0,
     };
   }
 }

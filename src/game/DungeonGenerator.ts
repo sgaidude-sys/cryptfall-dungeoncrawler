@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { AssetManager } from '../assets/AssetManager';
-import { RoomData } from '../types';
+import { RoomData, TownNpcId } from '../types';
 
 export const TILE = 4.0;
 export const ROOM_STEP = 28.0; // 5x5 room (20m) + 2-tile (8m) corridor = 28m center-to-center
@@ -28,7 +28,8 @@ export interface SpikeTrap {
 
 export interface Interactable {
   id: string;
-  kind: 'chest' | 'shrine' | 'trapdoor';
+  kind: 'chest' | 'shrine' | 'trapdoor' | 'npc';
+  npcId?: TownNpcId;
   x: number;
   z: number;
   mesh: THREE.Object3D;
@@ -60,6 +61,10 @@ export class DungeonFloorBuilder {
 
   public generate(floorNum: number): void {
     this.clear();
+    if (floorNum === 0) {
+      this.buildOakhavenTown();
+      return;
+    }
 
     // Generate 6-7 connected rooms on a grid
     const targetRooms = Math.min(8, 6 + Math.floor((floorNum - 1) / 2));
@@ -138,10 +143,10 @@ export class DungeonFloorBuilder {
     }
 
     this.rooms = list;
-    this.buildGeometry(grid);
+    this.buildGeometry(grid, floorNum);
   }
 
-  private buildGeometry(grid: Map<string, RoomData>): void {
+  private buildGeometry(grid: Map<string, RoomData>, floorNum: number): void {
     const builtCorridors = new Set<string>();
 
     for (const room of this.rooms) {
@@ -169,6 +174,204 @@ export class DungeonFloorBuilder {
         }
       }
     }
+
+    // Apply Biome Tinting to reused dungeon meshes
+    if (floorNum === 2) {
+      // Floor 2: Overgrown Subterranean Ruins (emerald moss tint)
+      this.group.traverse((obj) => {
+        if (obj instanceof THREE.Mesh && obj.material instanceof THREE.MeshStandardMaterial) {
+          obj.material = obj.material.clone();
+          obj.material.color.multiply(new THREE.Color(0x9be7b0));
+        }
+      });
+    } else if (floorNum >= 3) {
+      // Floor 3+: Obsidian Spire Core (obsidian & crimson tint)
+      this.group.traverse((obj) => {
+        if (obj instanceof THREE.Mesh && obj.material instanceof THREE.MeshStandardMaterial) {
+          obj.material = obj.material.clone();
+          obj.material.color.multiply(new THREE.Color(0x8b6ba8));
+        }
+      });
+    }
+  }
+
+  private createNpcLabelSprite(text: string, colorHex: string): THREE.Sprite {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 96;
+    const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = 'rgba(10, 14, 24, 0.82)';
+    ctx.beginPath();
+    ctx.roundRect(16, 14, 480, 68, 16);
+    ctx.fill();
+    ctx.strokeStyle = colorHex;
+    ctx.lineWidth = 4;
+    ctx.stroke();
+    ctx.font = 'bold 30px Segoe UI, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = colorHex;
+    ctx.fillText(text, 256, 48);
+
+    const tex = new THREE.CanvasTexture(canvas);
+    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+    const sprite = new THREE.Sprite(mat);
+    sprite.scale.set(3.2, 0.6, 1);
+    return sprite;
+  }
+
+  private buildOakhavenTown(): void {
+    const townRoom: RoomData = {
+      gx: 0,
+      gy: 0,
+      type: 'start',
+      widthTiles: 7,
+      depthTiles: 7,
+      worldX: 0,
+      worldZ: 0,
+      cleared: true,
+      discovered: true,
+      doors: {},
+    };
+    this.rooms = [townRoom];
+    const hw = (7 * TILE) / 2;
+    this.walkRects.push({
+      minX: -hw + 0.8,
+      maxX: hw - 0.8,
+      minZ: -hw + 0.8,
+      maxZ: hw - 0.8,
+    });
+
+    for (let ix = -3; ix <= 3; ix++) {
+      for (let iz = -3; iz <= 3; iz++) {
+        const tile = this.assets.cloneProp((ix + iz) % 2 === 0 ? 'dungeon/tileBrickA_medium.gltf.glb' : 'dungeon/tileBrickB_medium.gltf.glb');
+        tile.position.set(ix * TILE, -1.04, iz * TILE);
+        this.group.add(tile);
+      }
+    }
+
+    for (let i = -3; i <= 3; i++) {
+      const segs = [
+        { x: i * TILE, z: -hw, ry: 0 },
+        { x: i * TILE, z: hw, ry: Math.PI },
+        { x: -hw, z: i * TILE, ry: Math.PI / 2 },
+        { x: hw, z: i * TILE, ry: -Math.PI / 2 },
+      ];
+      for (const s of segs) {
+        const w = this.assets.cloneProp('dungeon/wall.gltf.glb');
+        w.position.set(s.x, 0, s.z);
+        w.rotation.y = s.ry;
+        this.group.add(w);
+      }
+    }
+
+    const townLight = new THREE.PointLight(0xffdca8, 3.2, 34);
+    townLight.position.set(0, 6.5, 0);
+    this.group.add(townLight);
+
+    const npcs: Array<{
+      npcId: TownNpcId;
+      model: string;
+      prop?: string;
+      x: number;
+      z: number;
+      ry: number;
+      tag: string;
+      color: string;
+      prompt: string;
+    }> = [
+      {
+        npcId: 'blacksmith',
+        model: 'Barbarian.glb',
+        prop: 'props_fantasy/Anvil.gltf',
+        x: -7.5,
+        z: -5.5,
+        ry: 0.6,
+        tag: '[⚒] Blacksmith (Refine)',
+        color: '#f97316',
+        prompt: '[E] Talk to Blacksmith (+1 to +10 Refine)',
+      },
+      {
+        npcId: 'kafra',
+        model: 'Ranger.glb',
+        prop: 'dungeon/chest_rare.gltf.glb',
+        x: 7.5,
+        z: -5.5,
+        ry: -0.6,
+        tag: '[📦] Kafra Storage',
+        color: '#38bdf8',
+        prompt: '[E] Open Kafra Card Storage',
+      },
+      {
+        npcId: 'hypnotist',
+        model: 'Mage.glb',
+        prop: 'props_fantasy/BookStand.gltf',
+        x: -7.5,
+        z: 5.5,
+        ry: 2.5,
+        tag: '[✦] Hypnotist (Reset)',
+        color: '#c084fc',
+        prompt: '[E] Talk to Hypnotist (Stat/Skill Reset)',
+      },
+      {
+        npcId: 'alchemist',
+        model: 'Rogue.glb',
+        prop: 'props_fantasy/Cauldron.gltf',
+        x: 7.5,
+        z: 5.5,
+        ry: -2.5,
+        tag: '[⚗] Alchemist (Potions)',
+        color: '#34d399',
+        prompt: '[E] Buy Red/Blue Potions',
+      },
+      {
+        npcId: 'guildmaster',
+        model: 'Knight.glb',
+        prop: 'props_fantasy/Banner_1.gltf',
+        x: 0,
+        z: -8.5,
+        ry: 0,
+        tag: '[!] Enter Dungeon',
+        color: '#facc15',
+        prompt: '[E] Enter Sunken Crypt (Floor 1)',
+      },
+    ];
+
+    for (const n of npcs) {
+      const charMesh = this.assets.cloneCharacter(n.model);
+      charMesh.position.set(n.x, 0, n.z);
+      charMesh.rotation.y = n.ry;
+      this.group.add(charMesh);
+
+      const labelSprite = this.createNpcLabelSprite(n.tag, n.color);
+      labelSprite.position.set(n.x, 2.75, n.z);
+      this.group.add(labelSprite);
+
+      if (n.prop) {
+        const propMesh = this.assets.cloneProp(n.prop);
+        propMesh.position.set(n.x + (n.x < 0 ? 1.5 : -1.5), 0, n.z + 0.6);
+        this.group.add(propMesh);
+      }
+
+      this.obstacles.push({ x: n.x, z: n.z, r: 0.75 });
+      this.interactables.push({
+        id: `npc_${n.npcId}`,
+        kind: n.npcId === 'guildmaster' ? 'trapdoor' : 'npc',
+        npcId: n.npcId,
+        x: n.x,
+        z: n.z,
+        mesh: charMesh,
+        used: false,
+        label: n.prompt,
+      });
+    }
+
+    const portal = this.assets.cloneProp('dungeon/trapdoor.gltf.glb');
+    portal.position.set(0, 0.04, -10.5);
+    this.group.add(portal);
+    const portalLight = new THREE.PointLight(0x38bdf8, 3.0, 9);
+    portalLight.position.set(0, 1.5, -10.5);
+    this.group.add(portalLight);
   }
 
   private buildRoom(room: RoomData): void {

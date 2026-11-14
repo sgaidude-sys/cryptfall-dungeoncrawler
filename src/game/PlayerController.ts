@@ -6,7 +6,9 @@ import { SoundEngine } from '../audio/SoundEngine';
 import { HERO_CLASSES } from './classes';
 import { DungeonFloorBuilder } from './DungeonGenerator';
 import { Enemy, EnemyManager } from './EnemyManager';
-import { HeroClassDef, HeroClassId, RelicId, SkillNodeId } from '../types';
+import { RagnarokStatsSystem, ElementType } from './RagnarokStatsSystem';
+import { SkillSystem, ROSkillId, RO_SKILLS, CLASS_SKILL_TREES } from './SkillSystem';
+import { HeroClassDef, HeroClassId, KafraItem, RelicId, SkillNodeId } from '../types';
 
 interface PlayerProjectile {
   mesh: THREE.Object3D;
@@ -31,6 +33,19 @@ export class PlayerController {
 
   public hp = 150;
   public maxHp = 150;
+  public sp = 100;
+  public maxSp = 100;
+  public roStats!: RagnarokStatsSystem;
+  public roSkills!: SkillSystem;
+  public redPotions = 5;
+  public bluePotions = 3;
+  public kafraStorage: KafraItem[] = [
+    { id: 'poring_card', name: 'Poring Card', desc: '+5 LUK (Crit & Perfect Dodge)', icon: '🃏', bonusStat: 'luk', bonusAmt: 5 },
+    { id: 'peco_card', name: 'Peco Peco Card', desc: '+10 VIT (Tank Soft DEF & HP)', icon: '🛡️', bonusStat: 'vit', bonusAmt: 10 },
+    { id: 'andre_card', name: 'Andre Card', desc: '+8 STR (Physical ATK)', icon: '⚔️', bonusStat: 'str', bonusAmt: 8 },
+    { id: 'elder_willow_card', name: 'Elder Willow Card', desc: '+8 INT (MATK & Max SP)', icon: '🔮', bonusStat: 'int', bonusAmt: 8 },
+  ];
+  public equippedCard: KafraItem | null = null;
   public relics: RelicId[] = [];
   public kills = 0;
   public gold = 0;
@@ -45,9 +60,12 @@ export class PlayerController {
   public skillCd = 0;
   public skill2Cd = 0;
   public ultCd = 0;
+  public skill4Cd = 0;
   public dodgeCd = 0;
   public dodgeMaxCd = 1.45;
   public iFrames = 0;
+  public castingSkill: { id: ROSkillId; name: string; timer: number; total: number; aimWorld: THREE.Vector3 } | null = null;
+  private regenTickTimer = 0;
   private whirlwindTimer = 0;
   private whirlwindTick = 0;
 
@@ -78,8 +96,13 @@ export class PlayerController {
     private sound: SoundEngine
   ) {
     this.def = HERO_CLASSES[classId];
-    this.maxHp = this.def.maxHp;
+    this.roStats = new RagnarokStatsSystem(classId);
+    this.roSkills = new SkillSystem(classId);
+    const derived = this.getDerived();
+    this.maxHp = derived.maxHp;
     this.hp = this.maxHp;
+    this.maxSp = derived.maxSp;
+    this.sp = this.maxSp;
 
     this.mesh = this.assets.cloneCharacter(this.def.modelFile);
     if (this.def.rightWeapon) {
@@ -117,16 +140,91 @@ export class PlayerController {
     return this.relics.includes(id);
   }
 
+  public getDerived() {
+    const d = this.roStats.getDerived(this.def.isRanged);
+    this.maxHp = d.maxHp;
+    this.maxSp = d.maxSp;
+    if (this.hp > this.maxHp) this.hp = this.maxHp;
+    if (this.sp > this.maxSp) this.sp = this.maxSp;
+    return d;
+  }
+
+  public equipKafraCard(card: KafraItem | null): void {
+    if (this.equippedCard?.bonusStat && this.equippedCard.bonusAmt) {
+      this.roStats.bonus[this.equippedCard.bonusStat] = Math.max(
+        0,
+        this.roStats.bonus[this.equippedCard.bonusStat] - this.equippedCard.bonusAmt
+      );
+    }
+    this.equippedCard = card;
+    if (card?.bonusStat && card.bonusAmt) {
+      this.roStats.bonus[card.bonusStat] += card.bonusAmt;
+    }
+    this.getDerived();
+  }
+
+  public useRedPotion(): boolean {
+    if (this.redPotions <= 0 || this.hp >= this.maxHp) return false;
+    this.redPotions--;
+    const d = this.getDerived();
+    const amt = Math.round(90 * d.potionMult);
+    this.heal(amt);
+    this.sound.playUIPopup();
+    return true;
+  }
+
+  public useBluePotion(): boolean {
+    if (this.bluePotions <= 0 || this.sp >= this.maxSp) return false;
+    this.bluePotions--;
+    const gain = Math.min(this.maxSp - this.sp, 55);
+    this.sp += gain;
+    if (gain > 0) {
+      this.vfx.spawnROText(this.pos.clone().add(new THREE.Vector3(0, 1.8, 0)), `+${gain}`, 'sp');
+    }
+    this.sound.playUIPopup();
+    return true;
+  }
+
+  public updateWeaponRefineVisuals(): void {
+    const ref = this.roStats.weaponRefine;
+    let glowColor = 0x000000;
+    let intensity = 0;
+    if (ref >= 10) {
+      glowColor = 0x38bdf8;
+      intensity = 1.15;
+    } else if (ref >= 7) {
+      glowColor = 0xfacc15;
+      intensity = 0.65;
+    } else if (ref >= 4) {
+      glowColor = 0xf97316;
+      intensity = 0.25;
+    }
+    this.mesh.traverse((obj) => {
+      if (obj instanceof THREE.Mesh && obj.material instanceof THREE.MeshStandardMaterial) {
+        if (obj.name.toLowerCase().includes('weapon') || obj.parent?.name?.includes('Hand')) {
+          obj.material.emissive.setHex(glowColor);
+          obj.material.emissiveIntensity = intensity;
+        }
+      }
+    });
+  }
+
   private getDamageStat(): { dmg: number; isCrit: boolean } {
-    let base = this.def.damage;
-    if (this.hasSkill('weapon_mastery')) base *= 1.22;
-    if (this.hasRelic('titanic_cleave')) base *= 1.28;
-    let crit = this.def.critChance;
-    if (this.hasSkill('weapon_mastery')) crit += 0.08;
-    if (this.hasRelic('berserker_blood')) crit += 0.15;
-    if (this.hasRelic('swiftfoot')) crit += 0.1;
-    const isCrit = Math.random() < crit;
-    return { dmg: Math.round(base * (isCrit ? 1.8 : 1.0)), isCrit };
+    const d = this.getDerived();
+    const isMage = this.def.id === 'mage';
+    let base = isMage
+      ? d.matkMin + Math.random() * Math.max(1, d.matkMax - d.matkMin)
+      : d.atkMin + Math.random() * Math.max(1, d.atkMax - d.atkMin);
+    if (this.hasSkill('weapon_mastery')) base *= 1.18;
+    if (this.hasRelic('titanic_cleave')) base *= 1.25;
+    if (this.roStats.magnumEndowTimer > 0 && !isMage) base *= 1.2;
+
+    let crit = d.critChance;
+    if (this.hasSkill('weapon_mastery')) crit += 0.05;
+    if (this.hasRelic('berserker_blood')) crit += 0.1;
+    if (this.hasRelic('swiftfoot')) crit += 0.08;
+    const isCrit = !isMage && Math.random() < crit;
+    return { dmg: Math.round(base * (isCrit ? 1.65 : 1.0)), isCrit };
   }
 
   private getCdMult(): number {
@@ -166,7 +264,12 @@ export class PlayerController {
       this.level++;
       this.xpToNext = Math.round(this.xpToNext * 1.35);
       this.skillPoints++;
-      this.heal(20);
+      this.roStats.onLevelUp(this.level);
+      this.roSkills.onLevelUp();
+      const d = this.getDerived();
+      this.hp = d.maxHp;
+      this.sp = d.maxSp;
+      this.vfx.spawnROText(this.pos.clone().add(new THREE.Vector3(0, 2.2, 0)), 'LEVEL UP!', 'heal');
       this.vfx.spawnBrackeysGroundEffect(this.pos, 'magic_rune', 0xfacc15, 4.2, 0.65, 2);
       this.vfx.spawnBurst(this.pos.clone().add(new THREE.Vector3(0, 1.0, 0)), 0xfde047, 20, 6);
       this.sound.playUIPopup();
@@ -184,15 +287,55 @@ export class PlayerController {
     ultPressed: boolean,
     dodgePressed: boolean,
     dungeon: DungeonFloorBuilder,
-    enemies: EnemyManager
+    enemies: EnemyManager,
+    skill4Pressed = false
   ): void {
     this.anim.update(dt);
+    this.roStats.tickTimers(dt);
+    const derived = this.getDerived();
+
     if (this.attackCd > 0) this.attackCd = Math.max(0, this.attackCd - dt);
     if (this.skillCd > 0) this.skillCd = Math.max(0, this.skillCd - dt);
     if (this.skill2Cd > 0) this.skill2Cd = Math.max(0, this.skill2Cd - dt);
     if (this.ultCd > 0) this.ultCd = Math.max(0, this.ultCd - dt);
+    if (this.skill4Cd > 0) this.skill4Cd = Math.max(0, this.skill4Cd - dt);
     if (this.dodgeCd > 0) this.dodgeCd = Math.max(0, this.dodgeCd - dt);
     if (this.iFrames > 0) this.iFrames = Math.max(0, this.iFrames - dt);
+
+    // Natural RO HP/SP Regen ticks every 3s
+    this.regenTickTimer += dt;
+    if (this.regenTickTimer >= 3.0) {
+      this.regenTickTimer = 0;
+      if (this.hp > 0 && this.hp < this.maxHp) {
+        this.hp = Math.min(this.maxHp, this.hp + derived.hpRegenPerTick);
+      }
+      if (this.hp > 0 && this.sp < this.maxSp) {
+        this.sp = Math.min(this.maxSp, this.sp + derived.spRegenPerTick);
+      }
+    }
+
+    // Active Cast-Time Chanting (Classic RO 150 DEX instant-cast scaling)
+    if (this.castingSkill) {
+      if (dodgePressed) {
+        this.castingSkill = null;
+        this.vfx.hideCastCircle();
+      } else {
+        this.castingSkill.timer -= dt;
+        const progress = Math.min(1, 1 - this.castingSkill.timer / Math.max(0.01, this.castingSkill.total));
+        const castColor = parseInt(this.def.accentHex.slice(1), 16);
+        this.vfx.updateCastCircle(this.pos, progress, castColor);
+        this.mesh.rotation.y = this.aimYaw;
+        this.anim.playLoop('Ranged_Magic_Spellcasting', 0.08, 1.15);
+        if (this.castingSkill.timer <= 0) {
+          const s = this.castingSkill;
+          this.castingSkill = null;
+          this.vfx.hideCastCircle();
+          this.executeROSkill(s.id, s.aimWorld, dungeon, enemies);
+        }
+        this.updateProjectiles(dt, dungeon, enemies);
+        return;
+      }
+    }
 
     // Barbarian Bloodlust Tempest whirlwind loop
     if (this.whirlwindTimer > 0) {
@@ -310,13 +453,16 @@ export class PlayerController {
         this.anim.playLoop('Idle_A', 0.14);
       }
 
-      // Signature Active Skills & Ultimate
-      if (ultPressed && this.ultCd <= 0) {
-        this.useUltimate(aimWorld, enemies);
-      } else if (skill2Pressed && this.hasSkill('unlock_skill2') && this.skill2Cd <= 0) {
-        this.useSecondSkill(dungeon, enemies);
-      } else if (skillPressed && this.skillCd <= 0) {
-        this.useActiveSkill(dungeon, enemies);
+      // Signature RO Active Skills (Slots 1-4)
+      const tree = CLASS_SKILL_TREES[this.def.id];
+      if (skill4Pressed && this.skill4Cd <= 0 && tree[3]) {
+        this.triggerROSkill(tree[3], 4, aimWorld, dungeon, enemies);
+      } else if (ultPressed && this.ultCd <= 0 && tree[2]) {
+        this.triggerROSkill(tree[2], 3, aimWorld, dungeon, enemies);
+      } else if (skill2Pressed && this.skill2Cd <= 0 && tree[1]) {
+        this.triggerROSkill(tree[1], 2, aimWorld, dungeon, enemies);
+      } else if (skillPressed && this.skillCd <= 0 && tree[0]) {
+        this.triggerROSkill(tree[0], 1, aimWorld, dungeon, enemies);
       } else if (attackHeld && this.attackCd <= 0 && this.whirlwindTimer <= 0) {
         this.usePrimaryAttack(enemies);
       }
@@ -362,9 +508,13 @@ export class PlayerController {
   }
 
   private usePrimaryAttack(_enemies: EnemyManager): void {
+    const derived = this.getDerived();
+    const roAspdMult = derived.aspd / 156;
     const atkSpdMult =
-      (this.hasRelic('berserker_blood') ? 1.25 : 1.0) * (this.hasSkill('relentless_tempo') ? 1.2 : 1.0);
-    this.attackCd = this.def.attackCooldown / atkSpdMult;
+      roAspdMult *
+      (this.hasRelic('berserker_blood') ? 1.2 : 1.0) *
+      (this.hasSkill('relentless_tempo') ? 1.15 : 1.0);
+    this.attackCd = Math.max(0.14, this.def.attackCooldown / atkSpdMult);
     this.mesh.rotation.y = this.aimYaw;
 
     const combo = this.attackComboIdx++;
@@ -451,240 +601,263 @@ export class PlayerController {
     return this.hasSkill('skill_overcharge') ? 1.35 : 1.0;
   }
 
-  private useSecondSkill(dungeon: DungeonFloorBuilder, enemies: EnemyManager): void {
-    this.skill2Cd = this.def.skill2Cooldown * this.getCdMult();
-    this.sound.playBattleCry();
-    this.mesh.rotation.y = this.aimYaw;
-    const forward = new THREE.Vector3(Math.sin(this.aimYaw), 0, Math.cos(this.aimYaw));
-    const { dmg } = this.getDamageStat();
-    const skillDmg = Math.round(dmg * this.getSkillDamageMult());
+  private triggerROSkill(
+    id: ROSkillId,
+    slot: 1 | 2 | 3 | 4,
+    aimWorld: THREE.Vector3,
+    dungeon: DungeonFloorBuilder,
+    enemies: EnemyManager
+  ): void {
+    const lv = this.roSkills.getLevel(id);
+    if (lv <= 0) {
+      this.vfx.spawnROText(this.pos.clone().add(new THREE.Vector3(0, 1.9, 0)), 'Skill Lv 0!', 'miss');
+      return;
+    }
+    const def = RO_SKILLS[id];
+    const spCost = def.spCost(lv);
+    if (this.sp < spCost) {
+      this.vfx.spawnROText(this.pos.clone().add(new THREE.Vector3(0, 1.9, 0)), 'Not enough SP!', 'miss');
+      return;
+    }
 
-    if (this.def.id === 'knight') {
-      // Vorpal Blade Wave
-      this.anim.playOneShot('UAL2_Melee_Hook', 0.04, 1.35, 0.35);
-      this.sound.playSwordClang(1.3);
-      const spawnPos = this.pos.clone().add(new THREE.Vector3(forward.x * 0.8, 1.1, forward.z * 0.8));
-      this.vfx.spawnBrackeysSlash(this.pos, this.aimYaw, 0xfacc15, 3.0, false);
-      this.spawnProjectile(spawnPos, forward.clone().multiplyScalar(18), Math.round(skillDmg * 1.9), true, 6, 0, 0, 0xfacc15, 'magic');
-    } else if (this.def.id === 'barbarian') {
-      // Earthshaker: 3 magma shockwave bolts forward
-      this.anim.playOneShot('UAL2_Sword_Heavy_Combo', 0.04, 1.4, 0.45);
+    const derived = this.getDerived();
+    const castTime = this.roSkills.getEffectiveCastTime(id, derived);
+    const cd = Math.max(0.4, def.cooldown(lv) * this.getCdMult() * (id === 'sonic_blow' || id === 'double_strafe' ? Math.max(0.45, 1 - (derived.aspd - 150) * 0.01) : 1));
+    if (slot === 1) this.skillCd = cd;
+    else if (slot === 2) this.skill2Cd = cd;
+    else if (slot === 3) this.ultCd = cd;
+    else this.skill4Cd = cd;
+
+    this.sp -= spCost;
+    if (castTime <= 0.02) {
+      this.executeROSkill(id, aimWorld, dungeon, enemies);
+    } else {
+      this.castingSkill = {
+        id,
+        name: `${def.name} Lv.${lv}`,
+        timer: castTime,
+        total: castTime,
+        aimWorld: aimWorld.clone(),
+      };
+    }
+  }
+
+  private executeROSkill(
+    id: ROSkillId,
+    aimWorld: THREE.Vector3,
+    dungeon: DungeonFloorBuilder,
+    enemies: EnemyManager
+  ): void {
+    const lv = Math.max(1, this.roSkills.getLevel(id));
+    const derived = this.getDerived();
+    const { dmg } = this.getDamageStat();
+    const skillMult = this.getSkillDamageMult();
+    const forward = new THREE.Vector3(Math.sin(this.aimYaw), 0, Math.cos(this.aimYaw));
+    this.mesh.rotation.y = this.aimYaw;
+
+    if (id === 'bash') {
+      // Knight Bash Lv 1-10: 100%-400% ATK, DEX-scaled hit, Stun Lv 6+
+      const mult = (1.0 + (lv - 1) * 0.333) * skillMult;
+      const stun = lv >= 6 ? 1.2 + (lv - 6) * 0.25 : 0;
+      this.anim.playOneShot('UAL2_Shield_Dash', 0.04, 1.35, 0.32);
+      this.sound.playSwordClang(1.25);
+      this.vfx.spawnSlashArc(this.pos, this.aimYaw, 3.4, 0xfacc15, false, 0.25);
+      this.vfx.spawnBrackeysBurst(this.pos.clone().add(new THREE.Vector3(forward.x * 1.4, 1.0, forward.z * 1.4)), 'spark', 0xfacc15, 2.2, 0.28);
+      for (const e of [...enemies.enemies]) {
+        if (!e.dead && e.pos.distanceTo(this.pos) <= 3.6) {
+          const dir = new THREE.Vector3().subVectors(e.pos, this.pos).setY(0).normalize();
+          if (forward.dot(dir) > 0.1 || e.pos.distanceTo(this.pos) < 1.5) {
+            this.applyHitToEnemy(e, Math.round(dmg * mult), dir, true, enemies, stun, true);
+          }
+        }
+      }
+    } else if (id === 'magnum_break') {
+      // Fire AoE knockback + 10s +20% Fire Endow
+      const mult = (1.6 + lv * 0.25) * skillMult;
+      this.roStats.magnumEndowTimer = 10.0;
+      this.anim.playOneShot('Melee_2H_Attack_Chop', 0.04, 1.3, 0.4);
       this.sound.playExplosion();
-      this.vfx.spawnBrackeysGroundEffect(this.pos, 'scorch', 0xf97316, 4.4, 0.45, 0);
-      this.vfx.addCameraShake(forward, 0.32);
-      const spawnPos = this.pos.clone().add(new THREE.Vector3(forward.x * 0.8, 0.9, forward.z * 0.8));
-      for (let i = -1; i <= 1; i++) {
-        const a = this.aimYaw + i * 0.24;
-        const dir = new THREE.Vector3(Math.sin(a), 0, Math.cos(a));
-        this.spawnProjectile(spawnPos.clone(), dir.multiplyScalar(15), Math.round(skillDmg * 1.7), true, 3, 0, 2.2, 0xf97316, 'magic');
+      this.vfx.spawnBrackeysGroundEffect(this.pos, 'scorch', 0xf97316, 4.8, 0.5, 0);
+      this.vfx.spawnRing(this.pos, 4.5, 0xf97316, 0.42);
+      this.vfx.addCameraShake(forward, 0.35);
+      this.vfx.spawnROText(this.pos.clone().add(new THREE.Vector3(0, 2.1, 0)), 'FIRE ENDOW!', 'guard');
+      for (const e of [...enemies.enemies]) {
+        if (!e.dead && e.pos.distanceTo(this.pos) <= 4.5) {
+          const dir = new THREE.Vector3().subVectors(e.pos, this.pos).setY(0).normalize();
+          const elemMult = RagnarokStatsSystem.getElementMultiplier('fire1', e.element);
+          this.applyHitToEnemy(e, Math.round(dmg * mult * elemMult), dir, true, enemies, 0.4, true);
+        }
       }
-    } else if (this.def.id === 'rogue') {
-      // Phantom Volley + Shadow Backflip
-      this.anim.playOneShot('UAL2_Melee_Hook', 0.04, 1.5, 0.3);
-      this.sound.playDodge();
-      this.vfx.spawnBrackeysBurst(this.pos.clone().add(new THREE.Vector3(0, 1, 0)), 'smoke', 0x34d399, 2.2, 0.35);
-      const spawnPos = this.pos.clone().add(new THREE.Vector3(0, 1.1, 0));
-      for (let i = -1; i <= 1; i++) {
-        const a = this.aimYaw + i * 0.2;
-        const dir = new THREE.Vector3(Math.sin(a), 0, Math.cos(a));
-        this.spawnProjectile(spawnPos.clone(), dir.multiplyScalar(22), Math.round(skillDmg * 1.5), true, 2, 0, 0, 0x34d399, 'dagger');
+    } else if (id === 'provoke_endure') {
+      // Tank Core: Pull aggro + flinch immunity
+      this.anim.playOneShot('UAL2_Shield_OneShot', 0.04, 1.2, 0.38);
+      this.sound.playBattleCry();
+      this.roStats.endureTimer = 6.0 + lv * 0.6;
+      const pulled = enemies.provokeAllNear(this.pos, 12.0);
+      this.vfx.spawnRing(this.pos, 10.0, 0x60a5fa, 0.5);
+      this.vfx.spawnROText(this.pos.clone().add(new THREE.Vector3(0, 2.1, 0)), `ENDURE (${pulled} Provoked)`, 'guard');
+    } else if (id === 'two_hand_quicken') {
+      // Massive ASPD Blender buff (or Barbarian Whirlwind + Quicken!)
+      this.anim.clearOneShot();
+      this.roStats.quickenTimer = 10.0 + lv * 1.0;
+      if (this.def.id === 'barbarian') {
+        this.whirlwindTimer = 2.5;
+        this.whirlwindTick = 0.05;
+        this.anim.playLoop('Melee_2H_Attack_Spin', 0.05, 1.65);
+      } else {
+        this.anim.playOneShot('UAL2_Melee_Hook', 0.04, 1.4, 0.35);
       }
-      for (let s = 0; s < 5; s++) this.tryMove(-forward.x * 0.5, -forward.z * 0.5, dungeon);
-    } else if (this.def.id === 'mage') {
-      // Arcane Nova: 4.8m frost-arcane pulse
-      this.anim.playOneShot('Ranged_Magic_Summon', 0.04, 1.45, 0.38);
+      this.sound.playBattleCry();
+      this.vfx.spawnRing(this.pos, 3.6, 0xfacc15, 0.4);
+      this.vfx.spawnROText(this.pos.clone().add(new THREE.Vector3(0, 2.1, 0)), 'QUICKEN +ASPD!', 'guard');
+    } else if (id === 'fire_bolt' || id === 'lightning_bolt') {
+      // Classic RO Lv 1-10 Multi-Hit Bolt Cascade!
+      const isFire = id === 'fire_bolt';
+      const elem: ElementType = isFire ? 'fire1' : 'wind1';
+      const color = isFire ? 0xff5500 : 0xfacc15;
+      this.anim.playOneShot('Ranged_Magic_Summon', 0.04, 1.5, 0.35);
+      this.sound.playArcaneBlast(isFire ? 1.0 : 1.35);
+
+      // Target nearest enemy near cursor or aim direction
+      let target: Enemy | null = null;
+      let bestDist = 8.0;
+      for (const e of enemies.enemies) {
+        if (e.dead) continue;
+        const d = e.pos.distanceTo(aimWorld);
+        if (d < bestDist) {
+          bestDist = d;
+          target = e;
+        }
+      }
+      if (!target) {
+        for (const e of enemies.enemies) {
+          if (!e.dead && e.pos.distanceTo(this.pos) < 13) {
+            target = e;
+            break;
+          }
+        }
+      }
+
+      if (target) {
+        const hitCount = lv;
+        const basePerHit = Math.round(((derived.matkMin + derived.matkMax) * 0.5) * 0.78 * skillMult);
+        const elemMult = RagnarokStatsSystem.getElementMultiplier(elem, target.element);
+        const hits: number[] = [];
+        for (let i = 0; i < hitCount; i++) {
+          const perHit = Math.max(1, Math.round(basePerHit * elemMult * (0.92 + Math.random() * 0.16)));
+          hits.push(perHit);
+          if (!isFire) {
+            this.vfx.spawnLightningArc(
+              target.pos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 1.2, 6, (Math.random() - 0.5) * 1.2)),
+              target.pos,
+              0xfacc15
+            );
+          } else {
+            this.vfx.spawnFallingStrike(target.pos, 0xff5500, false, i * 0.05);
+          }
+        }
+        const total = hits.reduce((a, b) => a + b, 0);
+        this.vfx.spawnMultiHitStack(target.pos, hits, elemMult > 1.2 ? 'magic' : 'normal');
+        const dir = new THREE.Vector3().subVectors(target.pos, this.pos).setY(0).normalize();
+        enemies.damageEnemy(target, total, dir, elemMult > 1.2, 0, true);
+        if (target.dead) {
+          this.kills++;
+          this.gold += target.isBoss ? 120 : 12;
+          this.grantXp(target.isBoss ? 120 : 25);
+        }
+      } else {
+        const spawnPos = this.pos.clone().add(new THREE.Vector3(forward.x * 0.8, 1.2, forward.z * 0.8));
+        this.spawnProjectile(spawnPos, forward.clone().multiplyScalar(18), Math.round(dmg * lv * 0.6), false, 0, 0, 0, color, 'magic');
+      }
+    } else if (id === 'frost_diver') {
+      // Water projectile that freezes targets solid cyan & sets Water Lv.1
+      this.anim.playOneShot('Ranged_Magic_Spellcasting', 0.04, 1.45, 0.35);
       this.sound.playIceNova();
-      this.vfx.spawnBrackeysGroundEffect(this.pos, 'magic_rune', 0x38bdf8, 5.2, 0.55, 4);
       this.vfx.spawnRing(this.pos, 4.8, 0x38bdf8, 0.45);
       for (const e of [...enemies.enemies]) {
-        if (!e.dead && e.pos.distanceTo(this.pos) <= 4.8) {
-          e.chillTimer = 3.5;
+        if (!e.dead && e.pos.distanceTo(this.pos) <= 5.5) {
+          enemies.freezeEnemy(e, 3.0 + lv * 0.35);
           const dir = new THREE.Vector3().subVectors(e.pos, this.pos).setY(0).normalize();
-          this.applyHitToEnemy(e, Math.round(skillDmg * 1.85), dir, true, enemies, 0.7);
+          this.applyHitToEnemy(e, Math.round(dmg * (1.1 + lv * 0.12) * skillMult), dir, false, enemies, 0, true);
         }
       }
-    } else if (this.def.id === 'ranger') {
-      // Frost Snare Shot: Explosive Frost Arrow
-      this.anim.playOneShot('Ranged_Bow_Release', 0.04, 1.4, 0.3);
-      this.sound.playIceNova();
-      const spawnPos = this.pos.clone().add(new THREE.Vector3(forward.x * 0.7, 1.15, forward.z * 0.7));
-      this.vfx.spawnBrackeysBurst(spawnPos, 'spark', 0x38bdf8, 1.5, 0.22);
-      this.spawnProjectile(spawnPos, forward.clone().multiplyScalar(22), Math.round(skillDmg * 1.9), true, 0, 0, 3.6, 0x38bdf8, 'arrow');
-    }
-  }
-
-  private useUltimate(aimWorld: THREE.Vector3, enemies: EnemyManager): void {
-    this.ultCd = this.def.ultCooldown * this.getCdMult();
-    this.sound.playBattleCry();
-    const { dmg } = this.getDamageStat();
-    const forward = new THREE.Vector3(Math.sin(this.aimYaw), 0, Math.cos(this.aimYaw));
-
-    if (this.def.id === 'knight') {
-      // Aegis Judgment: Heal +25, 2s i-frames, 5m consecrated pillar + lightning smite
-      this.anim.playOneShot('UAL2_Shield_OneShot', 0.04, 1.15, 0.45);
-      this.heal(25);
-      this.iFrames = Math.max(this.iFrames, 2.0);
-      this.sound.playExplosion();
-      this.vfx.spawnConsecratedPillar(this.pos, 0xfacc15, 2.8, 7.5);
-      this.vfx.spawnRing(this.pos, 5.2, 0xfacc15, 0.55);
-      this.vfx.spawnBrackeysGroundEffect(this.pos, 'magic_rune', 0xfacc15, 5.6, 0.65, 2);
-      this.vfx.spawnBrackeysGroundEffect(this.pos, 'scorch', 0xfde047, 4.6, 0.5, 0);
-      this.vfx.spawnBurst(this.pos.clone().add(new THREE.Vector3(0, 1.0, 0)), 0xfde047, 24, 6.5);
-      this.vfx.addCameraShake(forward, 0.35);
-      this.vfx.triggerHitStop(0.05);
-      for (const e of [...enemies.enemies]) {
-        if (!e.dead && e.pos.distanceTo(this.pos) <= 5.2) {
-          const dir = new THREE.Vector3().subVectors(e.pos, this.pos).setY(0).normalize();
-          this.vfx.spawnLightningArc(this.pos, e.pos, 0xfde047);
-          this.applyHitToEnemy(e, Math.round(dmg * 2.2), dir, true, enemies, 1.2);
-        }
-      }
-    } else if (this.def.id === 'barbarian') {
-      // Bloodlust Tempest: 2.5s spinning whirlwind
-      this.anim.clearOneShot();
-      this.anim.playLoop('Melee_2H_Attack_Spin', 0.05, 1.65);
-      this.whirlwindTimer = 2.5;
-      this.whirlwindTick = 0.05;
-      this.vfx.spawnRing(this.pos, 3.8, 0xf97316, 0.45);
-      this.vfx.spawnBurst(this.pos, 0xf97316, 18, 6);
-    } else if (this.def.id === 'rogue') {
-      // Fan of Knives: 10 piercing daggers 360 deg
-      this.anim.playOneShot('Melee_Dualwield_Attack_Slice', 0.05, 1.5, 0.3);
-      this.sound.playSwordClang(1.2);
-      this.vfx.spawnRing(this.pos, 3.2, 0x34d399, 0.3);
-      this.vfx.spawnBrackeysGroundEffect(this.pos, 'twirl', 0x34d399, 3.6, 0.35, 10);
-      this.vfx.spawnBurst(this.pos.clone().add(new THREE.Vector3(0, 1, 0)), 0x34d399, 16, 5.5);
-      const spawnPos = this.pos.clone().add(new THREE.Vector3(0, 1.1, 0));
-      for (let i = 0; i < 10; i++) {
-        const a = (i / 10) * Math.PI * 2;
-        const dir = new THREE.Vector3(Math.sin(a), 0, Math.cos(a));
-        this.spawnProjectile(spawnPos.clone(), dir.multiplyScalar(20), Math.round(dmg * 1.5), true, 2, 0, 0, 0x34d399, 'dagger');
-      }
-    } else if (this.def.id === 'mage') {
-      // Arcane Meteor Storm: 5 falling meteors streaking from the sky
+    } else if (id === 'meteor_storm') {
       this.anim.playOneShot('Ranged_Magic_Summon', 0.05, 1.4, 0.45);
       const targetCenter = aimWorld.clone().setY(0.1);
-      this.vfx.spawnRing(targetCenter, 4.2, 0xa855f7, 0.65);
-      this.vfx.spawnBrackeysGroundEffect(targetCenter, 'magic_rune', 0xa855f7, 4.6, 0.65, 2);
-      for (let i = 0; i < 5; i++) {
-        const a = (i / 5) * Math.PI * 2;
-        const r = i === 0 ? 0 : 2.3;
+      const waves = Math.min(7, 3 + Math.floor(lv / 2));
+      this.vfx.spawnRing(targetCenter, 4.6, 0xff5500, 0.65);
+      this.vfx.spawnBrackeysGroundEffect(targetCenter, 'magic_rune', 0xff5500, 5.0, 0.65, 2);
+      for (let i = 0; i < waves; i++) {
+        const a = (i / waves) * Math.PI * 2;
+        const r = i === 0 ? 0 : 2.5;
         const hitPos = targetCenter.clone().add(new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r));
-        this.vfx.spawnFallingStrike(hitPos, i % 2 === 0 ? 0xff5500 : 0xa855f7, true, i * 0.08, () => {
-          this.vfx.spawnBrackeysGroundEffect(hitPos, 'scorch', 0xff5500, 3.2, 0.45, 0);
-          this.triggerAoEExplosion(hitPos, 3.0, Math.round(dmg * 1.6), enemies, -1);
+        this.vfx.spawnFallingStrike(hitPos, i % 2 === 0 ? 0xff5500 : 0xfacc15, true, i * 0.1, () => {
+          this.vfx.spawnBrackeysGroundEffect(hitPos, 'scorch', 0xff5500, 3.4, 0.45, 0);
+          this.triggerAoEExplosion(hitPos, 3.2, Math.round(dmg * (1.3 + lv * 0.15) * skillMult), enemies, -1);
         });
       }
-    } else if (this.def.id === 'ranger') {
-      // Arrow Rain: 12 falling skyward arrows onto cursor area
-      this.anim.playOneShot('Ranged_Bow_Release_Up', 0.05, 1.3, 0.4);
-      this.sound.playBowTwang(1.3);
-      const targetCenter = aimWorld.clone().setY(0.1);
-      this.vfx.spawnRing(targetCenter, 4.5, 0xfde047, 0.65);
-      this.vfx.spawnBrackeysGroundEffect(targetCenter, 'ring', 0xfde047, 4.8, 0.65, 2);
-      for (let i = 0; i < 12; i++) {
-        const a = Math.random() * Math.PI * 2;
-        const r = Math.random() * 3.6;
-        const hitPos = targetCenter.clone().add(new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r));
-        this.vfx.spawnFallingStrike(hitPos, 0xfde047, false, i * 0.035, i === 6 ? () => {
-          this.vfx.spawnBrackeysBurst(targetCenter.clone().add(new THREE.Vector3(0, 0.8, 0)), 'spark', 0xfde047, 3.2, 0.35);
-          for (const e of [...enemies.enemies]) {
-            if (!e.dead && e.pos.distanceTo(targetCenter) <= 4.6) {
-              const dir = new THREE.Vector3().subVectors(e.pos, targetCenter).setY(0).normalize();
-              this.applyHitToEnemy(e, Math.round(dmg * 2.4), dir, true, enemies, 0.6);
-            }
-          }
-        } : undefined);
-      }
-    }
-  }
-
-  private useActiveSkill(dungeon: DungeonFloorBuilder, enemies: EnemyManager): void {
-    this.skillCd = this.def.skillCooldown * this.getCdMult();
-    this.sound.playBattleCry();
-    this.mesh.rotation.y = this.aimYaw;
-    const forward = new THREE.Vector3(Math.sin(this.aimYaw), 0, Math.cos(this.aimYaw));
-    const { dmg } = this.getDamageStat();
-
-    if (this.def.id === 'knight') {
-      // Shield Bash: forward dash + 3.2m AoE stun 1.8s
-      const startPos = this.pos.clone();
-      this.anim.playOneShot('UAL2_Shield_Dash', 0.04, 1.25, 0.35);
-      this.sound.playAxeThud(1.2);
-      this.iFrames = Math.max(this.iFrames, 0.3);
-      for (let s = 0; s < 6; s++) this.tryMove(forward.x * 0.55, forward.z * 0.55, dungeon);
-      this.vfx.spawnDashTrail(startPos, this.pos, 0x60a5fa, 5);
-      this.vfx.spawnRing(this.pos, 3.3, 0x60a5fa, 0.35);
-      this.vfx.spawnBrackeysGroundEffect(this.pos, 'ring', 0x60a5fa, 3.8, 0.35, 3);
-      this.vfx.spawnBrackeysBurst(this.pos.clone().add(new THREE.Vector3(0, 1.0, 0)), 'spark', 0x93c5fd, 2.0, 0.28);
-      this.vfx.spawnBurst(this.pos.clone().add(new THREE.Vector3(0, 0.9, 0)), 0x93c5fd, 16, 5.5);
-      this.vfx.addCameraShake(forward, 0.28);
-      this.vfx.triggerHitStop(0.04);
-      for (const e of [...enemies.enemies]) {
-        if (!e.dead && e.pos.distanceTo(this.pos) <= 3.3) {
-          const dir = new THREE.Vector3().subVectors(e.pos, this.pos).setY(0).normalize();
-          this.vfx.spawnSpriteFX(e.pos, 'slash', 2.4, 0x60a5fa);
-          this.applyHitToEnemy(e, Math.round(dmg * 1.65), dir, true, enemies, 1.8);
-        }
-      }
-    } else if (this.def.id === 'barbarian') {
-      // Seismic Leap
-      const startPos = this.pos.clone();
-      this.anim.playOneShot('Melee_2H_Attack_Chop', 0.05, 1.2, 0.42);
-      this.sound.playExplosion();
-      for (let s = 0; s < 8; s++) this.tryMove(forward.x * 0.65, forward.z * 0.65, dungeon);
-      this.vfx.spawnDashTrail(startPos, this.pos, 0xf97316, 6);
-      this.vfx.spawnConsecratedPillar(this.pos, 0xf97316, 2.2, 4.5);
-      this.vfx.spawnRing(this.pos, 4.4, 0xf97316, 0.42);
-      this.vfx.spawnBrackeysGroundEffect(this.pos, 'scorch', 0xf97316, 4.8, 0.5, 0);
-      this.vfx.spawnBrackeysBurst(this.pos.clone().add(new THREE.Vector3(0, 0.8, 0)), 'smoke', 0xfdba74, 2.2, 0.36);
-      this.vfx.spawnBurst(this.pos, 0xf97316, 22, 6.5);
-      this.vfx.addCameraShake(forward, 0.4);
-      this.vfx.triggerHitStop(0.04);
-      for (const e of [...enemies.enemies]) {
-        if (!e.dead && e.pos.distanceTo(this.pos) <= 4.4) {
-          const dir = new THREE.Vector3().subVectors(e.pos, this.pos).setY(0).normalize();
-          this.vfx.spawnSpriteFX(e.pos, 'slash', 2.8, 0xf97316);
-          this.applyHitToEnemy(e, Math.round(dmg * 2.1), dir, true, enemies, 1.4);
-        }
-      }
-    } else if (this.def.id === 'rogue') {
-      // Shadow Dash backstab
-      const startPos = this.pos.clone();
-      this.anim.playOneShot('UAL2_Sword_Dash', 0.04, 1.5, 0.3);
-      this.sound.playDodge();
-      this.iFrames = Math.max(this.iFrames, 0.35);
-      this.vfx.spawnBurst(this.pos, 0x34d399, 12, 4);
-      this.vfx.spawnBrackeysBurst(startPos.clone().add(new THREE.Vector3(0, 0.9, 0)), 'smoke', 0x10b981, 2.0, 0.32);
-      for (let s = 0; s < 10; s++) this.tryMove(forward.x * 0.6, forward.z * 0.6, dungeon);
-      this.vfx.spawnDashTrail(startPos, this.pos, 0x34d399, 7);
-      this.vfx.spawnBurst(this.pos, 0x34d399, 16, 5.5);
-      this.vfx.spawnSlashArc(this.pos, this.aimYaw, 3.0, 0x34d399, true);
-      this.vfx.spawnBrackeysGroundEffect(this.pos, 'twirl', 0x34d399, 3.2, 0.3, 8);
-      this.vfx.triggerHitStop(0.04);
-      for (const e of [...enemies.enemies]) {
-        if (!e.dead && e.pos.distanceTo(this.pos) <= 3.0) {
-          this.vfx.spawnSpriteFX(e.pos, 'slash', 2.6, 0x34d399);
-          this.applyHitToEnemy(e, Math.round(dmg * 2.4), forward, true, enemies, 0);
-        }
-      }
-    } else if (this.def.id === 'mage') {
-      // Piercing Fireball AoE
-      this.anim.playOneShot('Ranged_Magic_Spellcasting', 0.05, 1.4, 0.35);
-      this.sound.playArcaneBlast(1.2);
-      const spawnPos = this.pos.clone().add(new THREE.Vector3(forward.x * 0.8, 1.2, forward.z * 0.8));
-      this.spawnProjectile(spawnPos, forward.clone().multiplyScalar(15), Math.round(dmg * 2.1), true, 3, 0, 3.6, 0xff5500, 'magic');
-    } else if (this.def.id === 'ranger') {
-      // Multi-Arrow Volley (5 arrows)
-      this.anim.playOneShot('Ranged_Bow_Release', 0.05, 1.4, 0.3);
-      this.sound.playBowTwang(1.2);
+    } else if (id === 'energy_coat') {
+      this.roStats.energyCoatActive = !this.roStats.energyCoatActive;
+      this.sound.playUIPopup();
+      this.vfx.spawnRing(this.pos, 3.0, 0xa855f7, 0.4);
+      this.vfx.spawnROText(
+        this.pos.clone().add(new THREE.Vector3(0, 2.0, 0)),
+        this.roStats.energyCoatActive ? 'ENERGY COAT ON' : 'ENERGY COAT OFF',
+        'sp'
+      );
+    } else if (id === 'double_strafe') {
+      // Rapid 2-hit Arrow/Dagger combo
+      this.anim.playOneShot(this.def.id === 'ranger' ? 'Ranged_Bow_Release' : 'UAL2_Melee_Hook', 0.04, 1.6, 0.28);
+      if (this.def.id === 'ranger') this.sound.playBowTwang(1.25);
+      else this.sound.playSwordClang(1.3);
       const spawnPos = this.pos.clone().add(new THREE.Vector3(forward.x * 0.7, 1.15, forward.z * 0.7));
-      this.vfx.spawnBrackeysBurst(spawnPos, 'spark', 0xfde047, 1.5, 0.22);
-      for (let i = -2; i <= 2; i++) {
-        const a = this.aimYaw + i * 0.16;
+      const mult = (1.0 + lv * 0.15) * skillMult;
+      for (let i = 0; i < 2; i++) {
+        const a = this.aimYaw + (i === 0 ? -0.05 : 0.05);
         const dir = new THREE.Vector3(Math.sin(a), 0, Math.cos(a));
-        this.spawnProjectile(spawnPos.clone(), dir.multiplyScalar(22), Math.round(dmg * 1.1), i === 0, 1, this.hasRelic('ricochet') ? 1 : 0, 0, 0xfde047, 'arrow');
+        this.spawnProjectile(
+          spawnPos.clone(),
+          dir.multiplyScalar(23),
+          Math.round(dmg * mult),
+          i === 1,
+          1,
+          this.hasRelic('ricochet') ? 1 : 0,
+          0,
+          this.def.projectileColor ?? 0xfde047,
+          this.def.id === 'ranger' ? 'arrow' : 'dagger'
+        );
       }
+    } else if (id === 'sonic_blow') {
+      // Rapid 4-to-8 hit AGI/STR combo burst
+      const hitCount = Math.min(8, 4 + Math.floor(lv / 2));
+      this.anim.playOneShot('Melee_Dualwield_Attack_Slice', 0.04, 1.8, 0.35);
+      this.sound.playSwordClang(1.4);
+      this.vfx.spawnSlashArc(this.pos, this.aimYaw, 3.5, 0x34d399, true);
+      for (const e of [...enemies.enemies]) {
+        if (!e.dead && e.pos.distanceTo(this.pos) <= 3.8) {
+          const hits = Array.from({ length: hitCount }, () =>
+            Math.max(1, Math.round(dmg * (0.42 + lv * 0.04) * skillMult))
+          );
+          const total = hits.reduce((a, b) => a + b, 0);
+          this.vfx.spawnMultiHitStack(e.pos, hits, 'magic');
+          const dir = new THREE.Vector3().subVectors(e.pos, this.pos).setY(0).normalize();
+          enemies.damageEnemy(e, total, dir, true, lv >= 5 ? 0.8 : 0, true);
+          if (e.dead) {
+            this.kills++;
+            this.gold += e.isBoss ? 120 : 12;
+            this.grantXp(e.isBoss ? 120 : 25);
+          }
+        }
+      }
+    } else if (id === 'cloaking_backslide') {
+      const startPos = this.pos.clone();
+      this.anim.playOneShot('Dodge_Forward', 0.04, 1.6, 0.28);
+      this.sound.playDodge();
+      this.iFrames = Math.max(this.iFrames, 1.1 + lv * 0.08);
+      const stepDir = this.def.id === 'ranger' ? -1 : 1;
+      for (let s = 0; s < 8; s++) this.tryMove(forward.x * 0.6 * stepDir, forward.z * 0.6 * stepDir, dungeon);
+      this.vfx.spawnDashTrail(startPos, this.pos, 0x34d399, 7);
+      this.vfx.spawnROText(this.pos.clone().add(new THREE.Vector3(0, 2.0, 0)), 'CLOAK!', 'lucky');
     }
   }
 
@@ -828,8 +1001,18 @@ export class PlayerController {
     dir: THREE.Vector3,
     isCrit: boolean,
     enemies: EnemyManager,
-    stunSec: number
+    stunSec: number,
+    alwaysHit = false
   ): void {
+    const derived = this.getDerived();
+    if (!alwaysHit && !isCrit && this.def.id !== 'mage') {
+      const hitChance = THREE.MathUtils.clamp(0.8 + (derived.hit - enemy.flee) * 0.01, 0.25, 1.0);
+      if (Math.random() > hitChance) {
+        this.vfx.spawnROText(enemy.pos.clone().add(new THREE.Vector3(0, 1.8, 0)), 'Miss', 'miss');
+        return;
+      }
+    }
+
     const killed = enemies.damageEnemy(enemy, damage, dir, isCrit, stunSec);
     if (killed) {
       this.kills++;
@@ -868,15 +1051,56 @@ export class PlayerController {
     }
   }
 
-  public takeDamage(amount: number, dir: THREE.Vector3): void {
+  public takeDamage(amount: number, dir: THREE.Vector3, enemies?: EnemyManager): void {
     if (this.iFrames > 0 || this.hp <= 0) return;
-    this.hp = Math.max(0, this.hp - amount);
-    this.iFrames = 0.45;
-    this.impulseVel.addScaledVector(dir, 6.5);
+    const derived = this.getDerived();
+
+    // LUK Perfect Dodge ("Lucky!")
+    if (Math.random() < derived.perfectDodge) {
+      this.iFrames = 0.22;
+      this.vfx.spawnROText(this.pos.clone().add(new THREE.Vector3(0, 1.9, 0)), 'Lucky!', 'lucky');
+      return;
+    }
+
+    // Knight Auto Guard + Shield Reflect
+    const guardLv = this.roSkills.getLevel('auto_guard');
+    if (guardLv > 0 && Math.random() < 0.05 + guardLv * 0.025) {
+      this.iFrames = 0.25;
+      this.sound.playSwordClang(1.35);
+      this.vfx.spawnBrackeysBurst(this.pos.clone().add(new THREE.Vector3(0, 1.1, 0)), 'spark', 0xfacc15, 1.6, 0.22);
+      this.vfx.spawnROText(this.pos.clone().add(new THREE.Vector3(0, 2.0, 0)), 'Guard!', 'guard');
+      if (enemies) {
+        const reflectPct = Math.min(0.5, 0.2 + guardLv * 0.03);
+        const reflectDmg = Math.max(1, Math.round(amount * reflectPct));
+        for (const e of enemies.enemies) {
+          if (!e.dead && e.pos.distanceTo(this.pos) <= 3.5) {
+            enemies.damageEnemy(e, reflectDmg, dir.clone().negate(), false, 0);
+            break;
+          }
+        }
+      }
+      return;
+    }
+
+    // Classic RO Hard DEF (%) + Soft DEF (VIT flat) + Energy Coat SP drain
+    const { finalDamage, spDrained } = this.roStats.computeIncomingPhysicalDamage(amount, derived, this.sp);
+    if (spDrained > 0) {
+      this.sp = Math.max(0, this.sp - spDrained);
+    }
+
+    this.hp = Math.max(0, this.hp - finalDamage);
+    this.iFrames = this.roStats.endureTimer > 0 ? 0.28 : 0.45;
+    if (this.roStats.endureTimer <= 0) {
+      this.impulseVel.addScaledVector(dir, 6.5);
+      this.anim.playOneShot('Hit_A', 0.05, 1.4, 0.22);
+    }
     this.sound.playPlayerHit();
-    this.vfx.addCameraShake(dir, 0.34);
-    this.vfx.spawnDamageNumber(this.pos, amount, 'player-hit');
-    this.anim.playOneShot('Hit_A', 0.05, 1.4, 0.22);
+    this.vfx.addCameraShake(dir, finalDamage <= 1 ? 0.08 : 0.34);
+    this.vfx.spawnROText(
+      this.pos.clone().add(new THREE.Vector3(0, 1.7, 0)),
+      `${finalDamage}`,
+      finalDamage <= 1 ? 'tank1' : 'player-hit'
+    );
     if (this.hp <= 0) {
       this.anim.clearOneShot();
       this.anim.playOneShot('Death_A', 0.08, 1.0, 2.0);

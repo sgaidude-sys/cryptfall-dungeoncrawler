@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { RODamageNumbers, RODamageStyle } from '../ui/RODamageNumbers';
 
 interface Particle {
   mesh: THREE.Mesh;
@@ -88,10 +89,10 @@ export class VFXManager {
   private boxGeo = new THREE.BoxGeometry(0.18, 0.12, 0.28);
   private sparkGeo = new THREE.OctahedronGeometry(0.12, 0);
   private ringGeo = new THREE.RingGeometry(0.65, 1.0, 28);
-  private damageLayer: HTMLElement;
+  public roDmg = new RODamageNumbers();
+  private castCircleMesh: THREE.Mesh | null = null;
 
   constructor(private scene: THREE.Scene) {
-    this.damageLayer = document.getElementById('damage-layer')!;
     this.ringGeo.rotateX(-Math.PI / 2);
   }
 
@@ -474,21 +475,59 @@ export class VFXManager {
     this.beams.push({ line, life: 0.18, maxLife: 0.18 });
   }
 
+  public updateCastCircle(pos: THREE.Vector3, progress: number, colorHex = 0xa855f7): void {
+    if (!this.castCircleMesh) {
+      const geo = new THREE.PlaneGeometry(3.8, 3.8);
+      geo.rotateX(-Math.PI / 2);
+      const mat = new THREE.MeshBasicMaterial({
+        map: this.getBrackeysTex('magic_rune'),
+        color: colorHex,
+        transparent: true,
+        opacity: 0.85,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      });
+      this.castCircleMesh = new THREE.Mesh(geo, mat);
+      this.scene.add(this.castCircleMesh);
+    }
+    const mat = this.castCircleMesh.material as THREE.MeshBasicMaterial;
+    mat.color.setHex(colorHex);
+    this.castCircleMesh.visible = true;
+    this.castCircleMesh.position.set(pos.x, 0.08, pos.z);
+    this.castCircleMesh.rotation.y += 0.04;
+    const s = 0.45 + Math.min(1, progress) * 0.85;
+    this.castCircleMesh.scale.setScalar(s);
+  }
+
+  public hideCastCircle(): void {
+    if (this.castCircleMesh) {
+      this.castCircleMesh.visible = false;
+    }
+  }
+
+  public spawnROText(worldPos: THREE.Vector3, text: string | number, style: RODamageStyle = 'normal'): void {
+    this.roDmg.spawn(worldPos, text, style);
+  }
+
+  public spawnMultiHitStack(worldPos: THREE.Vector3, hits: number[], style: 'magic' | 'normal' = 'magic'): void {
+    this.roDmg.spawnMultiHitStack(worldPos, hits, style);
+  }
+
   public spawnDamageNumber(worldPos: THREE.Vector3, value: number | string, kind: 'normal' | 'crit' | 'heal' | 'player-hit' = 'normal'): void {
-    const el = document.createElement('div');
-    el.className = `dmg-num ${kind === 'normal' ? '' : kind}`;
-    el.textContent = typeof value === 'number' ? (kind === 'heal' ? `+${Math.round(value)}` : `${Math.round(value)}${kind === 'crit' ? '!' : ''}`) : value;
-    this.damageLayer.appendChild(el);
-    this.texts.push({
-      el,
-      worldPos: worldPos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.5, 1.9, (Math.random() - 0.5) * 0.5)),
-      life: 0.72,
-      maxLife: 0.72,
-      vy: 1.6,
-    });
+    if (kind === 'crit') {
+      this.roDmg.spawn(worldPos, typeof value === 'number' ? Math.round(value) : value, 'crit');
+    } else if (kind === 'heal') {
+      this.roDmg.spawn(worldPos, typeof value === 'number' ? `+${Math.round(value)}` : value, 'heal');
+    } else if (kind === 'player-hit') {
+      this.roDmg.spawn(worldPos, typeof value === 'number' ? Math.round(value) : value, 'normal');
+    } else {
+      this.roDmg.spawn(worldPos, typeof value === 'number' ? Math.round(value) : value, 'normal');
+    }
   }
 
   public update(dt: number, camera: THREE.Camera): void {
+    this.roDmg.update(dt, camera);
     // Update camera shake
     if (this.shakeIntensity > 0.001) {
       this.shakeOffset.set(

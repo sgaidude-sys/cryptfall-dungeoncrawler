@@ -646,3 +646,139 @@ html, body, #app {
   transform-origin: left center;
   filter: drop-shadow(0 2px 4px rgba(0,0,0,0.9));
 }
+
+/* SP Bar & Cast Bar */
+.sp-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 5px 0 8px;
+}
+
+.sp-track {
+  flex: 1;
+  height: 7px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  overflow: hidden;
+}
+
+.sp-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #0284c7, #38bdf8);
+  transition: width 0.12s ease;
+}
+
+.ro-cast-wrap {
+  position: fixed;
+  left: 50%;
+  bottom: 168px;
+  transform: translateX(-50%);
+  width: 280px;
+  background: rgba(10, 14, 24, 0.9);
+  border: 1px solid rgba(56, 189, 248, 0.6);
+  border-radius: 8px;
+  padding: 6px 10px;
+  text-align: center;
+  pointer-events: none;
+}
+
+.ro-cast-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #bae6fd;
+  margin-bottom: 4px;
+}
+
+.ro-cast-track {
+  height: 7px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.95);
+  overflow: hidden;
+}
+
+.ro-cast-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #38bdf8, #fde047);
+}
+
+/* Classic Ragnarok Online Floating Damage Numbers */
+#ro-dmg-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 45;
+}
+
+.ro-dmg {
+  position: fixed;
+  left: 0;
+  top: 0;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-weight: 900;
+  font-size: 20px;
+  color: #ffffff;
+  -webkit-text-stroke: 1.4px #0b0e14;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.95);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.ro-dmg-crit {
+  font-size: 24px;
+  color: #fef08a;
+  -webkit-text-stroke: 1.5px #7f1d1d;
+  background: radial-gradient(circle, rgba(220, 38, 38, 0.92) 0%, rgba(153, 27, 27, 0.78) 65%, transparent 100%);
+  padding: 4px 12px;
+  border-radius: 8px;
+  border: 2px solid #fca5a5;
+  box-shadow: 0 0 14px rgba(239, 68, 68, 0.75);
+}
+
+.ro-dmg-total {
+  font-size: 28px;
+  color: #fde047;
+  -webkit-text-stroke: 1.8px #422006;
+  filter: drop-shadow(0 0 10px rgba(250, 204, 21, 0.85));
+}
+
+.ro-dmg-heal {
+  color: #4ade80;
+  -webkit-text-stroke: 1.4px #052e16;
+}
+
+.ro-dmg-sp {
+  color: #38bdf8;
+  -webkit-text-stroke: 1.4px #082f49;
+}
+
+.ro-dmg-miss {
+  font-size: 16px;
+  color: #e2e8f0;
+  font-style: italic;
+}
+
+.ro-dmg-lucky {
+  font-size: 18px;
+  color: #22d3ee;
+  -webkit-text-stroke: 1.3px #083344;
+}
+
+.ro-dmg-guard {
+  font-size: 18px;
+  color: #fde047;
+  -webkit-text-stroke: 1.3px #422006;
+}
+
+.ro-dmg-tank1 {
+  font-size: 17px;
+  color: #cbd5e1;
+  -webkit-text-stroke: 1.2px #0f172a;
+}
+
+.ro-dmg-player-hit {
+  color: #f87171;
+  -webkit-text-stroke: 1.5px #450a0a;
+}

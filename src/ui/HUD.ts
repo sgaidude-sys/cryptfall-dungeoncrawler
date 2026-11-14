@@ -1,6 +1,25 @@
-import { HERO_CLASSES, HERO_CLASS_ORDER, SKILL_TREE_NODES } from '../game/classes';
+import { HERO_CLASSES, HERO_CLASS_ORDER } from '../game/classes';
 import { RELICS } from '../game/relics';
-import { HeroClassId, HUDState, RelicDef, RoomData, SkillNodeId } from '../types';
+import type { StatKey } from '../game/RagnarokStatsSystem';
+import { CLASS_SKILL_TREES, RO_SKILLS, ROSkillId } from '../game/SkillSystem';
+import { HeroClassId, HUDState, KafraItem, RelicDef, RoomData, SkillNodeId } from '../types';
+
+export interface ROCallbacks {
+  onToggleStats: () => void;
+  onAllocateStat: (stat: StatKey) => void;
+  onUpgradeROSkill: (id: ROSkillId) => void;
+  onRefineWeapon: () => void;
+  onRefineArmor: () => void;
+  onResetStats: () => void;
+  onResetSkills: () => void;
+  onBuyPotion: (kind: 'red' | 'blue') => void;
+  onEquipCard: (card: KafraItem | null) => void;
+  onCloseModal: () => void;
+  onUseRedPotion: () => void;
+  onUseBluePotion: () => void;
+  onEnterDungeon: () => void;
+  onReturnToTown: () => void;
+}
 
 export class HUDManager {
   private root: HTMLElement;
@@ -9,6 +28,11 @@ export class HUDManager {
   private minimapCanvas: HTMLCanvasElement | null = null;
   private showingCodex = false;
   private isMuted = false;
+  private ro?: ROCallbacks;
+
+  public setROCallbacks(ro: ROCallbacks): void {
+    this.ro = ro;
+  }
 
   constructor(
     private onSelectClass: (id: HeroClassId) => void,
@@ -27,6 +51,7 @@ export class HUDManager {
     private onUnlockSkill?: (id: SkillNodeId) => void
   ) {
     this.root = document.getElementById('ui-root')!;
+    void this.onUnlockSkill;
   }
 
   public showLoading(pct: number, label: string): void {
@@ -110,11 +135,21 @@ export class HUDManager {
       return;
     }
 
+    if (state.phase === 'stats_window') {
+      this.lastPhase = 'stats_window';
+      this.renderStatsWindow(state);
+      return;
+    }
+
+    if (state.phase === 'npc_modal') {
+      this.lastPhase = 'npc_modal';
+      this.renderNpcModal(state);
+      return;
+    }
+
     if (state.phase === 'skill_tree') {
-      if (this.lastPhase !== 'skill_tree') {
-        this.lastPhase = 'skill_tree';
-        this.renderSkillTree(state);
-      }
+      this.lastPhase = 'skill_tree';
+      this.renderSkillTree(state);
       return;
     }
 
@@ -269,16 +304,27 @@ export class HUDManager {
 
   private renderPlayingShell(state: HUDState): void {
     const cls = HERO_CLASSES[state.selectedClass];
+    const tree = CLASS_SKILL_TREES[state.selectedClass];
+    const floorTitle =
+      state.floor === 0
+        ? 'Oakhaven Town'
+        : state.floor === 1
+          ? 'Floor 1: Sunken Crypt'
+          : state.floor === 2
+            ? 'Floor 2: Overgrown Ruins'
+            : `Floor ${state.floor}: Obsidian Spire`;
     this.root.innerHTML = `
       <div class="hud">
         <div class="hud-top">
-          <div style="display:flex;gap:10px;align-items:flex-start">
+          <div style="display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap">
             <div class="hud-floor-card">
-              <div class="floor-title" id="hud-floor">Floor ${state.floor}</div>
-              <div class="floor-sub" id="hud-stats">Kills: 0 &bull; Gold: 0</div>
+              <div class="floor-title" id="hud-floor">${floorTitle}</div>
+              <div class="floor-sub" id="hud-stats">Lv.${state.level} &bull; Kills: 0 &bull; Gold: 0</div>
             </div>
-            <button id="btn-pause" class="class-tab interactive" style="padding:10px 14px;font-size:12px">ESC Menu</button>
-            <button id="btn-skills" class="class-tab interactive" style="padding:10px 14px;font-size:12px;border-color:rgba(250,204,21,0.45);color:#fde047">[K] Skills (<span id="hud-sp">${state.skillPoints}</span> SP)</button>
+            <button id="btn-pause" class="class-tab interactive" style="padding:9px 12px;font-size:12px">ESC Menu</button>
+            <button id="btn-ro-stats" class="class-tab interactive" style="padding:9px 12px;font-size:12px;border-color:rgba(56,189,248,0.45);color:#7dd3fc">[U] Stats (<span id="hud-stat-pts">${state.statPoints}</span>)</button>
+            <button id="btn-skills" class="class-tab interactive" style="padding:9px 12px;font-size:12px;border-color:rgba(250,204,21,0.45);color:#fde047">[K] Skills (<span id="hud-sp">${state.roSkillPoints}</span>)</button>
+            <button id="btn-town" class="class-tab interactive" style="padding:9px 12px;font-size:12px;border-color:rgba(52,211,153,0.45);color:#6ee7b7">${state.floor === 0 ? 'Enter Crypt' : 'Town'}</button>
           </div>
 
           <div class="boss-bar-wrap" id="boss-wrap" style="display:none">
@@ -295,34 +341,52 @@ export class HUDManager {
         <div id="hud-banner" class="banner-toast" style="display:none"></div>
         <div id="hud-interact" class="interact-prompt" style="display:none"></div>
 
+        <div id="ro-cast-wrap" class="ro-cast-wrap" style="display:none">
+          <div class="ro-cast-label" id="ro-cast-label">Casting...</div>
+          <div class="ro-cast-track"><div class="ro-cast-fill" id="ro-cast-fill" style="width:0%"></div></div>
+        </div>
+
         <div class="hud-bottom">
           <div class="player-bars">
             <div class="hp-row" style="align-items:center">
-              <span style="display:flex;align-items:center;gap:8px"><span class="weapon-badge" style="width:28px;transform:scale(1);background-position:0 -${HERO_CLASS_ORDER.indexOf(state.selectedClass) * 24}px"></span>${cls.name}</span>
+              <span style="display:flex;align-items:center;gap:8px"><span class="weapon-badge" style="width:28px;transform:scale(1);background-position:0 -${HERO_CLASS_ORDER.indexOf(state.selectedClass) * 24}px"></span>${cls.name} <span id="hud-refine-tag" style="font-size:11px;color:#fde047"></span></span>
               <span id="hud-hp-text">${state.hp} / ${state.maxHp}</span>
             </div>
             <div class="hp-track"><div class="hp-fill" id="hud-hp-fill" style="width:100%"></div></div>
+            <div class="sp-row">
+              <span style="font-size:11px;color:#7dd3fc">SP</span>
+              <div class="sp-track"><div class="sp-fill" id="hud-sp-fill" style="width:100%"></div></div>
+              <span id="hud-sp-text" style="font-size:11px;color:#bae6fd">${state.sp} / ${state.maxSp}</span>
+            </div>
             <div class="skill-row">
               <div class="skill-slot">
-                <div class="s-key">RMB / Q</div>
-                <div class="s-name">${cls.skillName}</div>
+                <div class="s-key">Q / 1</div>
+                <div class="s-name" id="name-skill1">${RO_SKILLS[tree[0]]?.name ?? cls.skillName}</div>
                 <div class="cd-overlay" id="cd-skill" style="display:none"></div>
               </div>
               <div class="skill-slot" id="slot-skill2">
                 <div class="s-key">C / 2</div>
-                <div class="s-name" id="name-skill2">${state.unlockedSkills.includes('unlock_skill2') ? cls.skill2Name : 'Locked ([K])'}</div>
+                <div class="s-name" id="name-skill2">${RO_SKILLS[tree[1]]?.name ?? cls.skill2Name}</div>
                 <div class="cd-overlay" id="cd-skill2" style="display:none"></div>
               </div>
               <div class="skill-slot">
                 <div class="s-key">R / 3</div>
-                <div class="s-name">${cls.ultName}</div>
+                <div class="s-name" id="name-skill3">${RO_SKILLS[tree[2]]?.name ?? cls.ultName}</div>
                 <div class="cd-overlay" id="cd-ult" style="display:none"></div>
               </div>
               <div class="skill-slot">
-                <div class="s-key">SPACE</div>
-                <div class="s-name">Dodge Roll</div>
-                <div class="cd-overlay" id="cd-dodge" style="display:none"></div>
+                <div class="s-key">V / 4</div>
+                <div class="s-name" id="name-skill4">${RO_SKILLS[tree[3]]?.name ?? 'Buff'}</div>
+                <div class="cd-overlay" id="cd-skill4" style="display:none"></div>
               </div>
+              <button class="skill-slot interactive" id="btn-red-pot" style="cursor:pointer;border-color:rgba(248,113,113,0.45)">
+                <div class="s-key">5 &bull; Red</div>
+                <div class="s-name" id="hud-red-pot">x${state.redPotions}</div>
+              </button>
+              <button class="skill-slot interactive" id="btn-blue-pot" style="cursor:pointer;border-color:rgba(56,189,248,0.45)">
+                <div class="s-key">6 &bull; Blue</div>
+                <div class="s-name" id="hud-blue-pot">x${state.bluePotions}</div>
+              </button>
             </div>
           </div>
 
@@ -331,32 +395,54 @@ export class HUDManager {
       </div>
     `;
     document.getElementById('btn-pause')?.addEventListener('click', () => this.onTogglePause?.());
+    document.getElementById('btn-ro-stats')?.addEventListener('click', () => this.ro?.onToggleStats());
     document.getElementById('btn-skills')?.addEventListener('click', () => this.onToggleSkillTree?.());
+    document.getElementById('btn-town')?.addEventListener('click', () => {
+      if (state.floor === 0) this.ro?.onEnterDungeon();
+      else this.ro?.onReturnToTown();
+    });
+    document.getElementById('btn-red-pot')?.addEventListener('click', () => this.ro?.onUseRedPotion());
+    document.getElementById('btn-blue-pot')?.addEventListener('click', () => this.ro?.onUseBluePotion());
   }
 
   private updatePlayingValues(state: HUDState): void {
     const floorEl = document.getElementById('hud-floor');
-    if (floorEl) floorEl.textContent = `Floor ${state.floor} — ${state.currentRoomType.toUpperCase()}`;
+    if (floorEl) {
+      floorEl.textContent =
+        state.floor === 0
+          ? 'Oakhaven Town Hub'
+          : state.floor === 1
+            ? 'Floor 1: Sunken Crypt'
+            : state.floor === 2
+              ? 'Floor 2: Overgrown Ruins'
+              : `Floor ${state.floor}: Obsidian Spire`;
+    }
 
     const statsEl = document.getElementById('hud-stats');
-    if (statsEl) statsEl.textContent = `Lv.${state.level} (${state.xp}/${state.xpToNext} XP)  •  Kills: ${state.kills}  •  Gold: ${state.gold}`;
+    if (statsEl) statsEl.textContent = `Lv.${state.level} (${state.xp}/${state.xpToNext} XP)  •  Kills: ${state.kills}  •  Zeny: ${state.gold}`;
+
+    const statPtsEl = document.getElementById('hud-stat-pts');
+    if (statPtsEl) statPtsEl.textContent = String(state.statPoints);
 
     const spEl = document.getElementById('hud-sp');
-    if (spEl) spEl.textContent = String(state.skillPoints);
+    if (spEl) spEl.textContent = String(state.roSkillPoints);
 
-    const skill2Unlocked = state.unlockedSkills.includes('unlock_skill2');
-    const nameSkill2 = document.getElementById('name-skill2');
-    if (nameSkill2) {
-      nameSkill2.textContent = skill2Unlocked ? HERO_CLASSES[state.selectedClass].skill2Name : 'Locked ([K])';
-      nameSkill2.style.opacity = skill2Unlocked ? '1' : '0.5';
-    }
+    const refEl = document.getElementById('hud-refine-tag');
+    if (refEl) refEl.textContent = state.weaponRefine > 0 ? `+${state.weaponRefine}` : '';
+
+    const tree = CLASS_SKILL_TREES[state.selectedClass];
+    const s1 = document.getElementById('name-skill1');
+    const s2 = document.getElementById('name-skill2');
+    const s3 = document.getElementById('name-skill3');
+    const s4 = document.getElementById('name-skill4');
+    if (s1 && tree[0]) s1.textContent = `${RO_SKILLS[tree[0]].name} (${state.roSkills[tree[0]] ?? 0})`;
+    if (s2 && tree[1]) s2.textContent = `${RO_SKILLS[tree[1]].name} (${state.roSkills[tree[1]] ?? 0})`;
+    if (s3 && tree[2]) s3.textContent = `${RO_SKILLS[tree[2]].name} (${state.roSkills[tree[2]] ?? 0})`;
+    if (s4 && tree[3]) s4.textContent = `${RO_SKILLS[tree[3]].name} (${state.roSkills[tree[3]] ?? 0})`;
 
     const cdSkill2 = document.getElementById('cd-skill2');
     if (cdSkill2) {
-      if (!skill2Unlocked) {
-        cdSkill2.style.display = 'flex';
-        cdSkill2.textContent = 'LOCK';
-      } else if (state.skill2Cd > 0.05) {
+      if (state.skill2Cd > 0.05) {
         cdSkill2.style.display = 'flex';
         cdSkill2.textContent = `${state.skill2Cd.toFixed(1)}s`;
       } else {
@@ -364,10 +450,43 @@ export class HUDManager {
       }
     }
 
+    const cdSkill4 = document.getElementById('cd-skill4');
+    if (cdSkill4) {
+      if (state.skill4Cd > 0.05) {
+        cdSkill4.style.display = 'flex';
+        cdSkill4.textContent = `${state.skill4Cd.toFixed(1)}s`;
+      } else {
+        cdSkill4.style.display = 'none';
+      }
+    }
+
+    const redEl = document.getElementById('hud-red-pot');
+    const blueEl = document.getElementById('hud-blue-pot');
+    if (redEl) redEl.textContent = `x${state.redPotions}`;
+    if (blueEl) blueEl.textContent = `x${state.bluePotions}`;
+
+    const castWrap = document.getElementById('ro-cast-wrap');
+    const castLabel = document.getElementById('ro-cast-label');
+    const castFill = document.getElementById('ro-cast-fill');
+    if (castWrap && castLabel && castFill) {
+      if (state.castingSkillName) {
+        castWrap.style.display = 'block';
+        castLabel.textContent = `Chanting ${state.castingSkillName}...`;
+        castFill.style.width = `${Math.round(state.castProgress * 100)}%`;
+      } else {
+        castWrap.style.display = 'none';
+      }
+    }
+
     const hpText = document.getElementById('hud-hp-text');
     const hpFill = document.getElementById('hud-hp-fill');
     if (hpText) hpText.textContent = `${Math.ceil(state.hp)} / ${state.maxHp}`;
     if (hpFill) hpFill.style.width = `${Math.max(0, (state.hp / state.maxHp) * 100)}%`;
+
+    const spText = document.getElementById('hud-sp-text');
+    const spFill = document.getElementById('hud-sp-fill');
+    if (spText) spText.textContent = `${Math.floor(state.sp)} / ${state.maxSp}`;
+    if (spFill) spFill.style.width = `${Math.max(0, (state.sp / Math.max(1, state.maxSp)) * 100)}%`;
 
     const cdSkill = document.getElementById('cd-skill');
     if (cdSkill) {
@@ -525,61 +644,207 @@ export class HUDManager {
 
   private renderSkillTree(state: HUDState): void {
     const cls = HERO_CLASSES[state.selectedClass];
-    const branches: Array<'Combat' | 'Arcane' | 'Vanguard'> = ['Combat', 'Arcane', 'Vanguard'];
+    const tree = CLASS_SKILL_TREES[state.selectedClass];
     this.root.innerHTML = `
       <div class="modal-backdrop interactive">
-        <div class="modal-title">${cls.name} Skill Tree</div>
-        <div style="font-size:14px;color:var(--muted);margin-bottom:8px">
-          Level <strong style="color:#fff">${state.level}</strong> (${state.xp}/${state.xpToNext} XP) &bull; Available Skill Points:
-          <strong style="color:#fde047">${state.skillPoints} SP</strong>
+        <div class="modal-title">${cls.name} — Ragnarok Skill Tree (Alt+S / K)</div>
+        <div style="font-size:14px;color:var(--muted);margin-bottom:10px">
+          Base Lv.<strong style="color:#fff">${state.level}</strong> &bull; Available Skill Points:
+          <strong style="color:#fde047">${state.roSkillPoints} SP</strong>
         </div>
-        <div style="display:grid;grid-template-columns:repeat(3,minmax(210px,250px));gap:16px;margin:10px 0 18px">
-          ${branches
-            .map((branch) => {
-              const nodes = SKILL_TREE_NODES.filter((n) => n.branch === branch);
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;max-width:860px;width:92%;margin:8px 0 18px">
+          ${tree
+            .map((id) => {
+              const def = RO_SKILLS[id];
+              const lv = state.roSkills[id] ?? 0;
+              const canUp = state.roSkillPoints > 0 && lv < def.maxLevel;
+              const effLv = Math.max(1, lv);
+              const baseCast = def.baseCastTime(effLv);
+              const castStr =
+                baseCast > 0
+                  ? `Cast: ${(baseCast * state.roDerived.castTimeMult).toFixed(2)}s`
+                  : 'Instant';
               return `
-                <div style="background:rgba(16,14,24,0.88);border:1px solid rgba(255,255,255,0.12);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:12px">
-                  <div style="font-size:13px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:${cls.accentHex};text-align:center">${branch}</div>
-                  ${nodes
-                    .map((n) => {
-                      const unlocked = state.unlockedSkills.includes(n.id);
-                      const reqMet = !n.requires || state.unlockedSkills.includes(n.requires);
-                      const canUnlock = !unlocked && reqMet && state.skillPoints > 0;
-                      const desc =
-                        n.id === 'unlock_skill2'
-                          ? `Unlocks [C] ${cls.skill2Name}: ${cls.skill2Desc}`
-                          : n.desc;
-                      const border = unlocked
-                        ? 'rgba(52,211,153,0.75)'
-                        : canUnlock
-                        ? 'rgba(250,204,21,0.75)'
-                        : 'rgba(255,255,255,0.1)';
-                      return `
-                        <button class="relic-card skill-node-btn" data-node="${n.id}" ${canUnlock ? '' : 'disabled'}
-                          style="text-align:left;padding:12px;border-color:${border};opacity:${unlocked || canUnlock ? '1' : '0.55'};cursor:${canUnlock ? 'pointer' : 'default'}">
-                          <span class="r-tag">${unlocked ? 'UNLOCKED' : `TIER ${n.tier} • 1 SP`}</span>
-                          <span class="r-name" style="font-size:14px">${n.name}</span>
-                          <span class="r-desc" style="font-size:12px">${desc}</span>
-                        </button>
-                      `;
-                    })
-                    .join('')}
+                <div style="background:rgba(16,14,24,0.92);border:1px solid ${lv > 0 ? 'rgba(52,211,153,0.55)' : 'rgba(255,255,255,0.14)'};border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:8px">
+                  <div style="display:flex;justify-content:space-between;align-items:center">
+                    <strong style="color:#fff;font-size:15px">${def.name}</strong>
+                    <span style="color:#fde047;font-size:13px;font-weight:700">Lv. ${lv} / ${def.maxLevel}</span>
+                  </div>
+                  <div style="font-size:12px;color:var(--muted);line-height:1.4">${def.desc(effLv)}</div>
+                  <div style="font-size:11px;color:#7dd3fc">${castStr} &bull; SP: ${def.spCost(effLv)} &bull; CD: ${def.cooldown(effLv)}s</div>
+                  <button class="start-btn ro-skill-up" data-skill="${id}" ${canUp ? '' : 'disabled'}
+                    style="padding:7px 12px;font-size:12px;opacity:${canUp ? '1' : '0.45'};cursor:${canUp ? 'pointer' : 'default'}">
+                    ${lv >= def.maxLevel ? 'MAX LEVEL' : '+ Level Up (1 SP)'}
+                  </button>
                 </div>
               `;
             })
             .join('')}
         </div>
-        <button class="start-btn" id="btn-close-skills" style="padding:11px 28px;font-size:14px">Resume ([K] / ESC)</button>
+        <button class="start-btn" id="btn-close-skills" style="padding:11px 28px;font-size:14px">Close ([K] / ESC)</button>
       </div>
     `;
 
-    this.root.querySelectorAll('.skill-node-btn').forEach((btn) => {
+    this.root.querySelectorAll('.ro-skill-up').forEach((btn) => {
       btn.addEventListener('click', () => {
-        const id = (btn as HTMLElement).dataset.node as SkillNodeId;
-        this.onUnlockSkill?.(id);
+        const id = (btn as HTMLElement).dataset.skill as ROSkillId;
+        this.ro?.onUpgradeROSkill(id);
       });
     });
     document.getElementById('btn-close-skills')?.addEventListener('click', () => this.onToggleSkillTree?.());
+  }
+
+  private renderStatsWindow(state: HUDState): void {
+    const d = state.roDerived;
+    const b = state.roBase;
+    const statsList: Array<{ key: StatKey; label: string; val: number; desc: string }> = [
+      { key: 'str', label: 'STR', val: b.str, desc: 'Melee ATK & Carry' },
+      { key: 'agi', label: 'AGI', val: b.agi, desc: 'ASPD & FLEE' },
+      { key: 'vit', label: 'VIT', val: b.vit, desc: 'Soft DEF, MaxHP & Potions' },
+      { key: 'int', label: 'INT', val: b.int, desc: 'MATK, MaxSP & SP Regen' },
+      { key: 'dex', label: 'DEX', val: b.dex, desc: 'HIT & Cast Time (-100% @ 150)' },
+      { key: 'luk', label: 'LUK', val: b.luk, desc: 'CRIT & Perfect Dodge' },
+    ];
+    const castPct = Math.round(d.castTimeMult * 100);
+    this.root.innerHTML = `
+      <div class="modal-backdrop interactive">
+        <div class="modal-title">Character Status (Alt+A / U)</div>
+        <div style="font-size:14px;color:var(--muted);margin-bottom:10px">
+          Stat Points Remaining: <strong style="color:#7dd3fc">${state.statPoints}</strong>
+          &bull; Weapon Refine: <strong style="color:#fde047">+${state.weaponRefine}</strong>
+          &bull; Armor Refine: <strong style="color:#34d399">+${state.armorRefine}</strong>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;max-width:760px;width:92%;margin:8px 0 18px">
+          <div style="background:rgba(16,14,24,0.92);border:1px solid rgba(255,255,255,0.14);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:8px">
+            <div style="font-size:12px;color:#7dd3fc;font-weight:700;text-transform:uppercase">Base Stats</div>
+            ${statsList
+              .map(
+                (s) => `
+              <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.06)">
+                <div>
+                  <strong style="color:#fff">${s.label}</strong>
+                  <span style="font-size:11px;color:var(--muted);margin-left:6px">${s.desc}</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <strong style="color:#fde047">${s.val}</strong>
+                  <button class="class-tab ro-stat-btn" data-stat="${s.key}" ${state.statPoints > 0 ? '' : 'disabled'}
+                    style="padding:3px 9px;font-size:12px;opacity:${state.statPoints > 0 ? '1' : '0.4'}">+</button>
+                </div>
+              </div>
+            `
+              )
+              .join('')}
+          </div>
+          <div style="background:rgba(16,14,24,0.92);border:1px solid rgba(255,255,255,0.14);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:7px;font-size:13px">
+            <div style="font-size:12px;color:#fde047;font-weight:700;text-transform:uppercase">Derived Combat Stats</div>
+            <div style="display:flex;justify-content:space-between"><span>ATK</span><strong>${d.atkMin} ~ ${d.atkMax}</strong></div>
+            <div style="display:flex;justify-content:space-between"><span>MATK</span><strong>${d.matkMin} ~ ${d.matkMax}</strong></div>
+            <div style="display:flex;justify-content:space-between"><span>DEF (Hard + Soft)</span><strong>${d.hardDef} + ${d.softDef}</strong></div>
+            <div style="display:flex;justify-content:space-between"><span>MDEF</span><strong>${d.mdef}</strong></div>
+            <div style="display:flex;justify-content:space-between"><span>HIT / FLEE</span><strong>${d.hit} / ${d.flee}</strong></div>
+            <div style="display:flex;justify-content:space-between"><span>CRIT / Perfect Dodge</span><strong>${Math.round(d.critChance * 100)}% / ${Math.round(d.perfectDodge * 100)}%</strong></div>
+            <div style="display:flex;justify-content:space-between"><span>ASPD</span><strong>${Math.round(d.aspd)}</strong></div>
+            <div style="display:flex;justify-content:space-between"><span>Cast Time</span><strong style="color:${castPct === 0 ? '#34d399' : '#fff'}">${castPct}% ${castPct === 0 ? '(INSTANT!)' : ''}</strong></div>
+          </div>
+        </div>
+        <button class="start-btn" id="btn-close-stats" style="padding:11px 28px;font-size:14px">Close ([U] / ESC)</button>
+      </div>
+    `;
+    this.root.querySelectorAll('.ro-stat-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        this.ro?.onAllocateStat((btn as HTMLElement).dataset.stat as StatKey);
+      });
+    });
+    document.getElementById('btn-close-stats')?.addEventListener('click', () => this.ro?.onCloseModal());
+  }
+
+  private renderNpcModal(state: HUDState): void {
+    const npc = state.activeNpc;
+    let title = 'Oakhaven NPC';
+    let body = '';
+    if (npc === 'blacksmith') {
+      title = '⚒ Blacksmith — Equipment Refining';
+      const wCost = (state.weaponRefine + 1) * 60;
+      const aCost = (state.armorRefine + 1) * 50;
+      body = `
+        <div style="font-size:13px;color:var(--muted)">Your Zeny: <strong style="color:#fde047">${state.gold}z</strong></div>
+        <div style="display:flex;gap:14px;flex-wrap:wrap;justify-content:center">
+          <div style="background:rgba(16,14,24,0.92);border:1px solid rgba(249,115,22,0.45);border-radius:12px;padding:16px;width:240px">
+            <strong style="color:#fdba74">Weapon Refine (+${state.weaponRefine}/+10)</strong>
+            <p style="font-size:12px;color:var(--muted);margin:8px 0">+5 ATK & +5 MATK per level. Glowing aura at +7 and +10!</p>
+            <button class="start-btn" id="btn-ref-w" ${state.weaponRefine >= 10 || state.gold < wCost ? 'disabled' : ''} style="width:100%;padding:9px;font-size:12px">
+              ${state.weaponRefine >= 10 ? 'MAX +10' : `Refine (${wCost}z)`}
+            </button>
+          </div>
+          <div style="background:rgba(16,14,24,0.92);border:1px solid rgba(56,189,248,0.45);border-radius:12px;padding:16px;width:240px">
+            <strong style="color:#7dd3fc">Armor Refine (+${state.armorRefine}/+10)</strong>
+            <p style="font-size:12px;color:var(--muted);margin:8px 0">+4 Hard DEF per level for near-zero VIT tanking!</p>
+            <button class="start-btn" id="btn-ref-a" ${state.armorRefine >= 10 || state.gold < aCost ? 'disabled' : ''} style="width:100%;padding:9px;font-size:12px">
+              ${state.armorRefine >= 10 ? 'MAX +10' : `Refine (${aCost}z)`}
+            </button>
+          </div>
+        </div>
+      `;
+    } else if (npc === 'kafra') {
+      title = '📦 Kafra Storage — Monster Cards';
+      body = `
+        <div style="font-size:13px;color:var(--muted)">Equipped Card: <strong style="color:#7dd3fc">${state.equippedCard?.name ?? 'None'}</strong></div>
+        <div style="display:grid;grid-template-columns:repeat(2,minmax(200px,240px));gap:12px">
+          ${state.kafraStorage
+            .map((c) => {
+              const eq = state.equippedCard?.id === c.id;
+              return `
+              <button class="relic-card kafra-card-btn" data-id="${c.id}" style="text-align:left;padding:12px;border-color:${eq ? '#34d399' : 'rgba(255,255,255,0.16)'}">
+                <span class="r-tag">${eq ? 'EQUIPPED' : c.icon}</span>
+                <span class="r-name" style="font-size:14px">${c.name}</span>
+                <span class="r-desc" style="font-size:12px">${c.desc}</span>
+              </button>
+            `;
+            })
+            .join('')}
+        </div>
+      `;
+    } else if (npc === 'hypnotist') {
+      title = '✦ Hypnotist — Stat & Skill Reset';
+      body = `
+        <p style="font-size:13px;color:var(--muted);max-width:440px;text-align:center">Free build resets in Oakhaven Town so you can test DEX Instant-Cast, VIT Tanking, or AGI/LUK Crit builds!</p>
+        <div style="display:flex;gap:12px">
+          <button class="start-btn" id="btn-reset-stats" style="padding:10px 18px;font-size:13px">Reset Base Stats</button>
+          <button class="start-btn" id="btn-reset-skills" style="padding:10px 18px;font-size:13px">Reset Skills</button>
+        </div>
+      `;
+    } else if (npc === 'alchemist') {
+      title = '⚗ Alchemist — Potion Shop';
+      body = `
+        <div style="font-size:13px;color:var(--muted)">Your Zeny: <strong style="color:#fde047">${state.gold}z</strong></div>
+        <div style="display:flex;gap:14px">
+          <button class="start-btn" id="btn-buy-red" ${state.gold < 25 ? 'disabled' : ''} style="padding:12px 18px;font-size:13px">Buy Red Potion (25z) [Owned: ${state.redPotions}]</button>
+          <button class="start-btn" id="btn-buy-blue" ${state.gold < 40 ? 'disabled' : ''} style="padding:12px 18px;font-size:13px">Buy Blue Potion (40z) [Owned: ${state.bluePotions}]</button>
+        </div>
+      `;
+    }
+
+    this.root.innerHTML = `
+      <div class="modal-backdrop interactive">
+        <div class="modal-title">${title}</div>
+        ${body}
+        <button class="class-tab" id="btn-close-npc" style="padding:10px 24px;margin-top:8px">Close (ESC)</button>
+      </div>
+    `;
+    document.getElementById('btn-ref-w')?.addEventListener('click', () => this.ro?.onRefineWeapon());
+    document.getElementById('btn-ref-a')?.addEventListener('click', () => this.ro?.onRefineArmor());
+    document.getElementById('btn-reset-stats')?.addEventListener('click', () => this.ro?.onResetStats());
+    document.getElementById('btn-reset-skills')?.addEventListener('click', () => this.ro?.onResetSkills());
+    document.getElementById('btn-buy-red')?.addEventListener('click', () => this.ro?.onBuyPotion('red'));
+    document.getElementById('btn-buy-blue')?.addEventListener('click', () => this.ro?.onBuyPotion('blue'));
+    this.root.querySelectorAll('.kafra-card-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = (btn as HTMLElement).dataset.id;
+        const card = state.kafraStorage.find((c) => c.id === id) ?? null;
+        this.ro?.onEquipCard(state.equippedCard?.id === id ? null : card);
+      });
+    });
+    document.getElementById('btn-close-npc')?.addEventListener('click', () => this.ro?.onCloseModal());
   }
 
   private renderDeath(state: HUDState): void {
