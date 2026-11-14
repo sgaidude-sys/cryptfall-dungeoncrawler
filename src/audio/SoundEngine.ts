@@ -33,10 +33,10 @@ export class SoundEngine {
   }
 
   private initMusicTracks(): void {
-    this.ambienceAudio = new Audio('./assets/sfx/music_ambience.mp3');
+    this.ambienceAudio = new Audio('./assets/sfx/ancient_cave.mp3');
     this.ambienceAudio.loop = true;
     this.ambienceAudio.volume = 0.28;
-    this.bossAudio = new Audio('./assets/sfx/music_boss.mp3');
+    this.bossAudio = new Audio('./assets/sfx/castle_barricade.mp3');
     this.bossAudio.loop = true;
     this.bossAudio.volume = 0.0;
   }

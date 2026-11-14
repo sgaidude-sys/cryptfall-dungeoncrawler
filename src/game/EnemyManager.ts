@@ -6,7 +6,28 @@ import { SoundEngine } from '../audio/SoundEngine';
 import { DungeonFloorBuilder } from './DungeonGenerator';
 import { RoomData } from '../types';
 
-export type EnemyKind = 'warrior' | 'minion' | 'rogue' | 'mage' | 'imp' | 'puglin' | 'boss';
+export type EnemyKind =
+  | 'warrior'
+  | 'minion'
+  | 'rogue'
+  | 'mage'
+  | 'imp'
+  | 'puglin'
+  | 'orc'
+  | 'demon'
+  | 'mushroom'
+  | 'ghost'
+  | 'slime'
+  | 'dragon'
+  | 'boss';
+
+export interface EnemyAnimSet {
+  idle: string;
+  move: string;
+  attack: string;
+  hit: string;
+  death: string;
+}
 
 export interface EnemyProjectile {
   mesh: THREE.Mesh;
@@ -41,6 +62,8 @@ export interface Enemy {
   baseScale: number;
   recoilTilt: number;
   squash: number;
+  anims: EnemyAnimSet;
+  isBoss: boolean;
 }
 
 export class EnemyManager {
@@ -59,14 +82,18 @@ export class EnemyManager {
   public spawnWaveForRoom(room: RoomData, floorNum: number): void {
     const scale = 1 + (floorNum - 1) * 0.25;
     if (room.type === 'boss') {
-      this.spawnEnemy('boss', room.worldX, room.worldZ - 3.5, scale);
-      this.spawnEnemy('rogue', room.worldX - 6, room.worldZ - 5, scale);
-      this.spawnEnemy('mage', room.worldX + 6, room.worldZ - 5, scale);
+      const bossKind: EnemyKind = floorNum >= 2 && floorNum % 2 === 0 ? 'dragon' : 'boss';
+      this.spawnEnemy(bossKind, room.worldX, room.worldZ - 3.5, scale);
+      this.spawnEnemy(floorNum >= 2 ? 'ghost' : 'rogue', room.worldX - 6, room.worldZ - 5, scale);
+      this.spawnEnemy(floorNum >= 2 ? 'demon' : 'mage', room.worldX + 6, room.worldZ - 5, scale);
       return;
     }
 
     const count = room.type === 'trap' ? 3 : 4 + Math.min(4, floorNum);
-    const pool: EnemyKind[] = ['warrior', 'minion', 'rogue', 'mage', 'imp', 'puglin'];
+    const pool: EnemyKind[] =
+      floorNum >= 2
+        ? ['warrior', 'minion', 'rogue', 'mage', 'imp', 'puglin', 'orc', 'slime', 'mushroom', 'ghost', 'demon']
+        : ['warrior', 'minion', 'rogue', 'mage', 'imp', 'puglin', 'orc', 'slime', 'mushroom'];
     for (let i = 0; i < count; i++) {
       const kind = pool[Math.floor(Math.random() * pool.length)];
       const angle = (i / count) * Math.PI * 2 + Math.random() * 0.5;
@@ -152,6 +179,85 @@ export class EnemyManager {
         name: 'Feral Puglin',
         rigged: false,
       },
+      orc: {
+        model: 'monsters/Orc.gltf',
+        rWep: undefined,
+        lWep: undefined,
+        hp: 105,
+        speed: 3.4,
+        dmg: 16,
+        range: 2.4,
+        rad: 0.72,
+        s: 0.72,
+        name: 'Orc Marauder',
+        anims: { idle: 'Idle', move: 'Run', attack: 'Weapon', hit: 'HitReact', death: 'Death' },
+      },
+      demon: {
+        model: 'monsters/Demon.gltf',
+        rWep: undefined,
+        lWep: undefined,
+        hp: 135,
+        speed: 3.6,
+        dmg: 20,
+        range: 2.8,
+        rad: 0.82,
+        s: 0.85,
+        name: 'Abyssal Fiend',
+        anims: { idle: 'Idle', move: 'Run', attack: 'Punch', hit: 'HitReact', death: 'Death' },
+      },
+      mushroom: {
+        model: 'monsters/MushroomKing.gltf',
+        rWep: undefined,
+        lWep: undefined,
+        hp: 90,
+        speed: 2.9,
+        dmg: 15,
+        range: 2.3,
+        rad: 0.68,
+        s: 0.72,
+        name: 'Spore Warden',
+        anims: { idle: 'Idle', move: 'Walk', attack: 'Punch', hit: 'HitReact', death: 'Death' },
+      },
+      ghost: {
+        model: 'monsters/Ghost_Skull.gltf',
+        rWep: undefined,
+        lWep: undefined,
+        hp: 58,
+        speed: 4.8,
+        dmg: 14,
+        range: 2.2,
+        rad: 0.58,
+        s: 0.78,
+        name: 'Wailing Skull',
+        anims: { idle: 'Flying_Idle', move: 'Fast_Flying', attack: 'Headbutt', hit: 'HitReact', death: 'Death' },
+      },
+      slime: {
+        model: 'monsters/GreenSpikyBlob.gltf',
+        rWep: undefined,
+        lWep: undefined,
+        hp: 72,
+        speed: 3.1,
+        dmg: 12,
+        range: 2.0,
+        rad: 0.62,
+        s: 0.72,
+        name: 'Venom Slime',
+        anims: { idle: 'Idle', move: 'Walk', attack: 'Bite_Front', hit: 'HitRecieve', death: 'Death' },
+      },
+      dragon: {
+        model: 'monsters/Dragon_Evolved.gltf',
+        rWep: undefined,
+        lWep: undefined,
+        hp: 620,
+        speed: 3.7,
+        dmg: 26,
+        range: 4.2,
+        rad: 1.25,
+        s: 1.35,
+        name: 'Ignis Wyrm',
+        isBoss: true,
+        anims: { idle: 'Flying_Idle', move: 'Fast_Flying', attack: 'Punch', hit: 'HitReact', death: 'Death' },
+      },
       boss: {
         model: 'characters/Skeleton_Warrior.glb',
         rWep: 'weapons/Skeleton_Blade.gltf',
@@ -163,32 +269,55 @@ export class EnemyManager {
         rad: 1.15,
         s: 1.85,
         name: 'Dread Bone Colossus',
+        isBoss: true,
       },
     }[kind];
 
     const mesh = this.assets.cloneCharacter(cfg.model);
     mesh.scale.setScalar(cfg.s);
-    mesh.position.set(x, kind === 'imp' ? 0.75 : 0, z);
+    mesh.position.set(x, kind === 'imp' ? 0.75 : kind === 'ghost' || kind === 'dragon' ? 0.45 : 0, z);
     if (cfg.rWep) this.assets.attachToHand(mesh, cfg.rWep, 'right');
     if (cfg.lWep) this.assets.attachToHand(mesh, cfg.lWep, 'left');
 
-    if (kind === 'boss') {
-      const aura = new THREE.PointLight(0xff3344, 18, 12);
+    if (kind === 'boss' || kind === 'dragon') {
+      const aura = new THREE.PointLight(kind === 'dragon' ? 0xff7722 : 0xff3344, 18, 12);
       aura.position.set(0, 2.2, 0);
       mesh.add(aura);
-    } else if (kind === 'imp') {
-      const aura = new THREE.PointLight(0xff6622, 6, 5);
-      aura.position.set(0, 0.8, 0);
+    } else if (kind === 'imp' || kind === 'demon') {
+      const aura = new THREE.PointLight(0xff5522, 6, 5);
+      aura.position.set(0, 0.9, 0);
+      mesh.add(aura);
+    } else if (kind === 'ghost') {
+      const aura = new THREE.PointLight(0x66e0ff, 5, 5);
+      aura.position.set(0, 0.9, 0);
       mesh.add(aura);
     }
 
     this.scene.add(mesh);
 
+    const anims: EnemyAnimSet =
+      'anims' in cfg && cfg.anims
+        ? cfg.anims
+        : {
+            idle: 'Skeletons_Idle',
+            move: 'Skeletons_Walking',
+            attack: kind === 'rogue' ? 'Ranged_1H_Shoot' : kind === 'mage' ? 'Ranged_Magic_Shoot' : kind === 'boss' ? 'Melee_1H_Attack_Slice_Horizontal' : 'Melee_1H_Attack_Chop',
+            hit: 'Hit_A',
+            death: 'Skeletons_Death',
+          };
+
+    const customClips = this.assets.getModelClips(cfg.model);
     let anim: AnimatorHelper | null = null;
     if (!('rigged' in cfg) || cfg.rigged) {
-      anim = new AnimatorHelper(mesh, this.assets);
-      anim.playOneShot('Skeletons_Spawn_Ground', 0.05, 1.4, 0.55);
+      anim = new AnimatorHelper(mesh, this.assets, customClips);
+      if (customClips) {
+        anim.playLoop(anims.idle, 0.08);
+      } else {
+        anim.playOneShot('Skeletons_Spawn_Ground', 0.05, 1.4, 0.55);
+      }
     }
+
+    const isBoss = 'isBoss' in cfg && Boolean(cfg.isBoss);
 
     const enemy: Enemy = {
       id: this.nextId++,
@@ -216,6 +345,8 @@ export class EnemyManager {
       baseScale: cfg.s,
       recoilTilt: 0,
       squash: 0,
+      anims,
+      isBoss,
     };
     this.enemies.push(enemy);
     return enemy;
@@ -227,7 +358,7 @@ export class EnemyManager {
     this.vfx.spawnDamageNumber(enemy.pos, amount, isCrit ? 'crit' : 'normal');
     this.vfx.spawnBurst(enemy.pos.clone().add(new THREE.Vector3(0, 1, 0)), isCrit ? 0xffd54f : 0xff6b6b, isCrit ? 12 : 6, 4.5);
 
-    const kb = enemy.kind === 'boss' ? 3.2 : isCrit ? 9.5 : 6.8;
+    const kb = enemy.isBoss ? 3.2 : isCrit ? 9.5 : 6.8;
     enemy.vel.addScaledVector(knockDir, kb);
     enemy.recoilTilt = isCrit ? -0.45 : -0.28;
     enemy.squash = isCrit ? 0.28 : 0.16;
@@ -238,13 +369,14 @@ export class EnemyManager {
       this.clearTelegraph(enemy);
     }
 
-    if (enemy.kind === 'boss' && !enemy.phase2Triggered && enemy.hp <= enemy.maxHp * 0.5 && enemy.hp > 0) {
+    if (enemy.isBoss && !enemy.phase2Triggered && enemy.hp <= enemy.maxHp * 0.5 && enemy.hp > 0) {
       enemy.phase2Triggered = true;
       enemy.speed *= 1.3;
       this.vfx.spawnRing(enemy.pos, 7, 0xff2244, 0.5);
       this.sound.playExplosion();
-      this.spawnEnemy('minion', enemy.pos.x - 3, enemy.pos.z + 2, 1);
-      this.spawnEnemy('minion', enemy.pos.x + 3, enemy.pos.z + 2, 1);
+      const addKind: EnemyKind = enemy.kind === 'dragon' ? 'imp' : 'minion';
+      this.spawnEnemy(addKind, enemy.pos.x - 3, enemy.pos.z + 2, 1);
+      this.spawnEnemy(addKind, enemy.pos.x + 3, enemy.pos.z + 2, 1);
     }
 
     if (enemy.hp <= 0) {
@@ -253,12 +385,12 @@ export class EnemyManager {
       enemy.deathTimer = 0.85;
       this.clearTelegraph(enemy);
       enemy.anim?.clearOneShot();
-      enemy.anim?.playOneShot('Skeletons_Death', 0.08, 1.3, 1.2);
-      this.vfx.spawnBoneShatter(enemy.pos, enemy.kind === 'boss' ? 34 : 14);
+      enemy.anim?.playOneShot(enemy.anims.death, 0.08, 1.3, 1.2);
+      this.vfx.spawnBoneShatter(enemy.pos, enemy.isBoss ? 34 : 14);
       this.sound.playBoneShatter();
       return true;
     } else if (enemy.state !== 'windup') {
-      enemy.anim?.playOneShot('Hit_A', 0.05, 1.4, 0.22);
+      enemy.anim?.playOneShot(enemy.anims.hit, 0.05, 1.4, 0.22);
     }
     return false;
   }
@@ -314,7 +446,7 @@ export class EnemyManager {
 
       if (e.stunTimer > 0) {
         e.stunTimer -= dt;
-        e.anim?.playLoop('Skeletons_Idle', 0.12);
+        e.anim?.playLoop(e.anims.idle, 0.12);
         if (e.stunTimer <= 0) e.state = 'chase';
         continue;
       }
@@ -336,7 +468,7 @@ export class EnemyManager {
 
       if (e.state === 'cooldown') {
         e.stateTimer -= dt;
-        e.anim?.playLoop('Skeletons_Idle', 0.14);
+        e.anim?.playLoop(e.anims.idle, 0.14);
         if (e.stateTimer <= 0) e.state = 'chase';
       } else if (e.state === 'windup') {
         e.stateTimer -= dt;
@@ -348,24 +480,24 @@ export class EnemyManager {
           this.executeAttack(e, playerPos, onPlayerHit);
           this.clearTelegraph(e);
           e.state = 'cooldown';
-          e.stateTimer = e.kind === 'boss' ? 0.9 : 0.75;
+          e.stateTimer = e.isBoss ? 0.9 : 0.75;
         }
       } else {
         // Chase / position
         e.mesh.rotation.y = Math.atan2(dir.x, dir.z);
         if (dist <= e.range * 0.9) {
           e.state = 'windup';
-          e.stateTimer = e.kind === 'boss' ? 0.75 : e.kind === 'rogue' ? 0.65 : 0.55;
+          e.stateTimer = e.isBoss ? 0.75 : e.kind === 'rogue' ? 0.65 : 0.55;
           e.attackTarget.copy(playerPos);
           this.createTelegraph(e, dir);
-          e.anim?.playLoop('Skeletons_Idle', 0.1);
+          e.anim?.playLoop(e.anims.idle, 0.1);
         } else {
           const moveSpd = e.speed * spdMult;
           const nx = e.pos.x + dir.x * moveSpd * dt;
           const nz = e.pos.z + dir.z * moveSpd * dt;
           if (dungeon.isWalkable(nx, e.pos.z, e.radius)) e.pos.x = nx;
           if (dungeon.isWalkable(e.pos.x, nz, e.radius)) e.pos.z = nz;
-          e.anim?.playLoop('Skeletons_Walking', 0.12, spdMult * 1.15);
+          e.anim?.playLoop(e.anims.move, 0.12, spdMult * 1.15);
         }
       }
     }
@@ -410,7 +542,7 @@ export class EnemyManager {
       this.scene.add(mesh);
       e.telegraphMesh = mesh;
     } else {
-      const rad = e.kind === 'boss' ? 4.2 : e.kind === 'mage' ? 2.4 : e.range;
+      const rad = e.isBoss ? 4.3 : e.kind === 'mage' ? 2.4 : e.range;
       const geo = new THREE.RingGeometry(0.15, rad, 24);
       geo.rotateX(-Math.PI / 2);
       const mesh = new THREE.Mesh(geo, mat);
@@ -451,15 +583,16 @@ export class EnemyManager {
       this.vfx.spawnRing(e.attackTarget, 2.5, 0xff3366, 0.3);
       const d = Math.hypot(playerPos.x - e.attackTarget.x, playerPos.z - e.attackTarget.z);
       if (d < 2.4) onPlayerHit(e.damage, dir);
-    } else if (e.kind === 'boss') {
-      e.anim?.playOneShot('Melee_1H_Attack_Slice_Horizontal', 0.06, 1.1, 0.5);
+    } else if (e.isBoss) {
+      e.anim?.playOneShot(e.anims.attack, 0.06, 1.1, 0.5);
       this.sound.playExplosion();
-      this.vfx.spawnRing(e.pos, 4.3, 0xff3344, 0.4);
+      const isDragon = e.kind === 'dragon';
+      this.vfx.spawnRing(e.pos, 4.4, isDragon ? 0xff7722 : 0xff3344, 0.4);
       this.vfx.addCameraShake(dir, 0.35);
-      if (e.pos.distanceTo(playerPos) <= 4.3) {
+      if (e.pos.distanceTo(playerPos) <= 4.4) {
         onPlayerHit(e.damage, dir);
       }
-      // Radial bone bolts
+      // Radial bolts / fireballs
       const bolts = e.phase2Triggered ? 8 : 5;
       for (let b = 0; b < bolts; b++) {
         const a = (b / bolts) * Math.PI * 2;
@@ -467,14 +600,16 @@ export class EnemyManager {
           e.pos.clone().add(new THREE.Vector3(0, 1.2, 0)),
           new THREE.Vector3(Math.cos(a) * 9.5, 0, Math.sin(a) * 9.5),
           Math.round(e.damage * 0.65),
-          0xff3355
+          isDragon ? 0xff8822 : 0xff3355
         );
       }
     } else {
-      e.anim?.playOneShot('Melee_1H_Attack_Chop', 0.06, 1.35, 0.35);
-      e.vel.addScaledVector(dir, e.kind === 'puglin' ? 7.8 : 5.2);
+      e.anim?.playOneShot(e.anims.attack, 0.06, 1.35, 0.35);
+      e.vel.addScaledVector(dir, e.kind === 'puglin' || e.kind === 'ghost' ? 7.8 : 5.2);
       this.sound.playSwordClang(0.65);
-      this.vfx.spawnSlashArc(e.pos, Math.atan2(dir.x, dir.z), e.range, e.kind === 'puglin' ? 0xfacc15 : 0xff4444);
+      const slashCol =
+        e.kind === 'slime' ? 0x4ade80 : e.kind === 'ghost' ? 0x38bdf8 : e.kind === 'demon' ? 0xff5522 : e.kind === 'puglin' ? 0xfacc15 : 0xff4444;
+      this.vfx.spawnSlashArc(e.pos, Math.atan2(dir.x, dir.z), e.range, slashCol);
       if (e.pos.distanceTo(playerPos) <= e.range + 0.45) {
         onPlayerHit(e.damage, dir);
       }
@@ -490,7 +625,7 @@ export class EnemyManager {
   }
 
   public getActiveBoss(): Enemy | null {
-    return this.enemies.find((e) => e.kind === 'boss' && !e.dead) ?? null;
+    return this.enemies.find((e) => e.isBoss && !e.dead) ?? null;
   }
 
   public clear(): void {

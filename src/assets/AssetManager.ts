@@ -8,6 +8,7 @@ export class AssetManager {
 
   private models = new Map<string, THREE.Group>();
   private clips = new Map<string, THREE.AnimationClip>();
+  private modelClips = new Map<string, Map<string, THREE.AnimationClip>>();
   private sharedPaletteMaterials = new Map<string, THREE.MeshStandardMaterial>();
   private sharedDungeonMaterials = new Map<string, THREE.Material>();
 
@@ -23,9 +24,15 @@ export class AssetManager {
       'characters/Skeleton_Minion.glb',
       'characters/Skeleton_Rogue.glb',
       'characters/Skeleton_Mage.glb',
-      // Bestiary Monsters
+      // Bestiary & Ultimate Monsters
       'monsters/Imp.glb',
       'monsters/Puglin.glb',
+      'monsters/Demon.gltf',
+      'monsters/Orc.gltf',
+      'monsters/MushroomKing.gltf',
+      'monsters/Dragon_Evolved.gltf',
+      'monsters/Ghost_Skull.gltf',
+      'monsters/GreenSpikyBlob.gltf',
       // Weapons & Shields
       'weapons/sword_1handed.gltf',
       'weapons/shield_badge_color.gltf',
@@ -63,6 +70,13 @@ export class AssetManager {
       'dungeon/trapdoor.gltf.glb',
       'dungeon/banner.gltf.glb',
       'dungeon/artifact.gltf.glb',
+      // Fantasy Props MegaKit
+      'props_fantasy/Cauldron.gltf',
+      'props_fantasy/Anvil.gltf',
+      'props_fantasy/Banner_1.gltf',
+      'props_fantasy/CandleStick_Triple.gltf',
+      'props_fantasy/BookStand.gltf',
+      'props_fantasy/Potion_1.gltf',
     ];
 
     const animPaths = [
@@ -126,6 +140,13 @@ export class AssetManager {
       const gltf = await this.loader.loadAsync(`./assets/${path}`);
       this.unifyMaterials(gltf.scene, path);
       this.models.set(path, gltf.scene);
+      if (gltf.animations && gltf.animations.length > 0) {
+        const clipMap = new Map<string, THREE.AnimationClip>();
+        for (const clip of gltf.animations) {
+          clipMap.set(clip.name, clip);
+        }
+        this.modelClips.set(path, clipMap);
+      }
       done++;
       onProgress((done / total) * 100, `Loading ${path.split('/').pop()}...`);
     }
@@ -134,12 +155,13 @@ export class AssetManager {
   private unifyMaterials(root: THREE.Object3D, assetPath: string): void {
     const isDungeon = assetPath.startsWith('dungeon/');
     const isMonster = assetPath.startsWith('monsters/');
+    const isFantasyProp = assetPath.startsWith('props_fantasy/');
     root.traverse((obj) => {
       if (!(obj instanceof THREE.Mesh)) return;
       obj.castShadow = true;
       obj.receiveShadow = true;
 
-      if (isMonster) return;
+      if (isMonster || isFantasyProp) return;
       const origMat = obj.material as THREE.MeshStandardMaterial;
       if (!origMat) return;
 
@@ -215,5 +237,9 @@ export class AssetManager {
 
   public getClip(name: string): THREE.AnimationClip | undefined {
     return this.clips.get(name);
+  }
+
+  public getModelClips(path: string): Map<string, THREE.AnimationClip> | undefined {
+    return this.modelClips.get(path);
   }
 }

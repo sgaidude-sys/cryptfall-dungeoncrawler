@@ -7,17 +7,25 @@ export class AnimatorHelper {
   private currentName = '';
   private oneshotTimer = 0;
 
-  constructor(root: THREE.Object3D, private assets: AssetManager) {
+  constructor(
+    root: THREE.Object3D,
+    private assets: AssetManager,
+    private customClips?: Map<string, THREE.AnimationClip>
+  ) {
     this.mixer = new THREE.AnimationMixer(root);
   }
 
   private getAction(clipName: string): THREE.AnimationAction | null {
     if (this.actions.has(clipName)) return this.actions.get(clipName)!;
-    const clip = this.assets.getClip(clipName);
+    const clip = this.customClips?.get(clipName) ?? this.assets.getClip(clipName);
     if (!clip) return null;
     const action = this.mixer.clipAction(clip);
     this.actions.set(clipName, action);
     return action;
+  }
+
+  public hasClip(clipName: string): boolean {
+    return Boolean(this.customClips?.has(clipName) || this.assets.getClip(clipName));
   }
 
   public playLoop(clipName: string, fade = 0.14, timeScale = 1): void {

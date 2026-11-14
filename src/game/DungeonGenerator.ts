@@ -306,15 +306,40 @@ export class DungeonFloorBuilder {
     if (room.type === 'treasure') {
       this.spawnChest(room.worldX - 2.4, room.worldZ - 1.5, 'rare');
       this.spawnShrine(room.worldX + 2.4, room.worldZ - 1.5);
+      for (const side of [-1, 1]) {
+        const candle = this.assets.cloneProp('props_fantasy/CandleStick_Triple.gltf');
+        candle.position.set(room.worldX + side * 4.4, 0, room.worldZ - 1.5);
+        candle.scale.setScalar(1.25);
+        this.group.add(candle);
+      }
     }
 
     if (room.type === 'start') {
       const banner = this.assets.cloneProp('dungeon/banner.gltf.glb');
       banner.position.set(room.worldX, 0.2, room.worldZ - hd + 0.7);
       this.group.add(banner);
+
+      const bookStand = this.assets.cloneProp('props_fantasy/BookStand.gltf');
+      bookStand.position.set(room.worldX - hw + 2.0, 0, room.worldZ - hd + 2.0);
+      bookStand.rotation.y = Math.PI * 0.25;
+      this.group.add(bookStand);
+
+      const candle = this.assets.cloneProp('props_fantasy/CandleStick_Triple.gltf');
+      candle.position.set(room.worldX + hw - 2.0, 0, room.worldZ - hd + 2.0);
+      candle.scale.setScalar(1.25);
+      this.group.add(candle);
     }
 
-    // Corner crates/barrels for dungeon flavor
+    if (room.type === 'boss') {
+      for (const side of [-1, 1]) {
+        const banner = this.assets.cloneProp('props_fantasy/Banner_1.gltf');
+        banner.position.set(room.worldX + side * 5.2, 0, room.worldZ - hd + 1.0);
+        banner.scale.setScalar(1.15);
+        this.group.add(banner);
+      }
+    }
+
+    // Corner crates/barrels & fantasy props for dungeon flavor
     if (room.type !== 'start') {
       const barrel = this.assets.cloneProp('dungeon/barrel.gltf.glb');
       barrel.position.set(room.worldX - hw + 1.5, 0, room.worldZ + hd - 1.5);
@@ -322,6 +347,20 @@ export class DungeonFloorBuilder {
       const crate = this.assets.cloneProp('dungeon/crate.gltf.glb');
       crate.position.set(room.worldX + hw - 1.5, 0, room.worldZ - hd + 1.5);
       this.group.add(crate);
+
+      const propList = [
+        'props_fantasy/Cauldron.gltf',
+        'props_fantasy/Anvil.gltf',
+        'props_fantasy/BookStand.gltf',
+        'props_fantasy/CandleStick_Triple.gltf',
+      ];
+      const roomSeed = Math.abs(Math.round(room.worldX + room.worldZ));
+      const fantasyPropPath = propList[roomSeed % propList.length];
+      const fProp = this.assets.cloneProp(fantasyPropPath);
+      fProp.position.set(room.worldX - hw + 1.8, 0, room.worldZ - hd + 1.8);
+      fProp.rotation.y = (roomSeed * 0.8) % (Math.PI * 2);
+      if (fantasyPropPath.includes('CandleStick')) fProp.scale.setScalar(1.25);
+      this.group.add(fProp);
     }
   }
 
