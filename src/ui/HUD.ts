@@ -35,6 +35,11 @@ export class HUDManager {
     this.ro = ro;
   }
 
+  public clearForCutscene(): void {
+    this.lastPhase = 'cutscene';
+    this.root.innerHTML = '';
+  }
+
   constructor(
     private onSelectClass: (id: HeroClassId) => void,
     private onStartGame: () => void,

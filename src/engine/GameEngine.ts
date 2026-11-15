@@ -324,6 +324,7 @@ export class GameEngine {
     this.phase = 'playing';
     this.player.anim.playOneShot('Spawn_Ground', 0.05, 1.0, 1.1);
     this.sound.setMusicMode('explore');
+    this.hud.clearForCutscene();
     void this.director.play(
       'act0_foreclosure',
       (d) => runAct0Foreclosure(d, this.player!.pos),
@@ -508,6 +509,7 @@ export class GameEngine {
 
     if (this.phase === 'playing' && this.player) {
       if (this.director.active) {
+        this.hud.clearForCutscene();
         this.player.anim.update(rawDt);
         this.enemies.enemies.forEach((e) => e.anim?.update(rawDt));
         this.dungeon.update(rawDt, elapsed);

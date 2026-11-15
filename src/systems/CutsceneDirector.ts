@@ -53,6 +53,8 @@ export class CutsceneDirector {
   private currentLook = new THREE.Vector3();
   private camTween: CameraTween | null = null;
   private orbitTween: OrbitTween | null = null;
+  private fovTween: { startFov: number; endFov: number; elapsed: number; duration: number } | null = null;
+  private tempLights: THREE.PointLight[] = [];
   private moveTweens: ActorMoveTween[] = [];
   private waitTimers: Array<{ remaining: number; resolve: () => void }> = [];
   private shakeTimer = 0;
@@ -215,6 +217,11 @@ export class CutsceneDirector {
     }
     this.camTween = null;
     this.orbitTween = null;
+    this.fovTween = null;
+    this.camera.fov = 48;
+    this.camera.updateProjectionMatrix();
+    for (const l of this.tempLights) this.scene.remove(l);
+    this.tempLights = [];
     this.moveTweens = [];
     this.waitTimers = [];
     this.shakeTimer = 0;
@@ -302,6 +309,36 @@ export class CutsceneDirector {
     }
   }
 
+  public setFov(fov: number, duration = 0.8): void {
+    if (this.aborted || duration <= 0.01) {
+      this.camera.fov = fov;
+      this.camera.updateProjectionMatrix();
+      return;
+    }
+    this.fovTween = { startFov: this.camera.fov, endFov: fov, elapsed: 0, duration };
+  }
+
+  public spawnDramaticLight(pos: THREE.Vector3, colorHex: number, intensity = 14, distance = 14): void {
+    if (this.aborted) return;
+    const light = new THREE.PointLight(colorHex, intensity, distance);
+    light.position.copy(pos);
+    this.scene.add(light);
+    this.tempLights.push(light);
+  }
+
+  public spawnEpicRitual(pos: THREE.Vector3, colorHex: number): void {
+    if (this.aborted) return;
+    this.vfx.spawnBrackeysGroundEffect(pos, 'magic_rune', colorHex, 5.5, 1.4, 3);
+    this.vfx.spawnConsecratedPillar(pos, colorHex, 2.2, 7.0);
+    this.vfx.spawnRing(pos, 5.0, colorHex, 0.7);
+    this.vfx.spawnBurst(pos.clone().add(new THREE.Vector3(0, 1.2, 0)), colorHex, 32, 7.5);
+  }
+
+  public spawnLightningStrike(from: THREE.Vector3, to: THREE.Vector3, colorHex: number): void {
+    if (this.aborted) return;
+    this.vfx.spawnLightningArc(from, to, colorHex);
+  }
+
   public spawnVFXBurst(pos: THREE.Vector3, colorHex: number, particleCount = 24): void {
     if (this.aborted) return;
     this.vfx.spawnBurst(pos, colorHex, particleCount, 6.5);
@@ -377,6 +414,16 @@ export class CutsceneDirector {
         this.orbitTween = null;
         res();
       }
+    }
+
+    if (this.fovTween) {
+      const f = this.fovTween;
+      f.elapsed += dt;
+      const p = Math.min(1, f.elapsed / f.duration);
+      const ease = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+      this.camera.fov = f.startFov + (f.endFov - f.startFov) * ease;
+      this.camera.updateProjectionMatrix();
+      if (p >= 1) this.fovTween = null;
     }
 
     if (this.shakeTimer > 0) {
