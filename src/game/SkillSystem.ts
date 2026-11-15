@@ -185,12 +185,12 @@ export const CLASS_SKILL_TREES: Record<HeroClassId, ROSkillId[]> = {
 
 export class SkillSystem {
   public levels = new Map<ROSkillId, number>();
-  public skillPoints = 4;
+  public skillPoints = 2;
 
   constructor(public classId: HeroClassId) {
     const tree = CLASS_SKILL_TREES[classId];
-    // Start with Lv.3 in primary signature skill & Lv.1 in utility skill
-    this.levels.set(tree[0], 3);
+    // Start with Lv.1 in primary signature skill
+    this.levels.set(tree[0], 1);
     if (tree[1]) this.levels.set(tree[1], 1);
     if (classId === 'mage') this.levels.set('energy_coat', 1);
   }

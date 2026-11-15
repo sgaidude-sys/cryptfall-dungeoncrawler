@@ -55,14 +55,14 @@ const STARTER_BASE: Record<HeroClassId, BaseStats> = {
 export class RagnarokStatsSystem {
   public base: BaseStats;
   public bonus: BaseStats = { str: 0, agi: 0, vit: 0, int: 0, dex: 0, luk: 0 };
-  public statPoints = 18;
+  public statPoints = 6;
   public level = 1;
   public jobLevel = 1;
   public weaponRefine = 0; // +0..+10
   public armorRefine = 0;  // +0..+10
-  public baseArmorDef = 18;
-  public baseWeaponAtk = 28;
-  public baseWeaponMatk = 24;
+  public baseArmorDef = 6;
+  public baseWeaponAtk = 22;
+  public baseWeaponMatk = 20;
 
   // Active RO buffs
   public endureTimer = 0;
@@ -148,7 +148,7 @@ export class RagnarokStatsSystem {
     const matkMax = Math.max(matkMin, total.int + Math.pow(Math.floor(total.int / 7), 2) + this.baseWeaponMatk + this.weaponRefine * 5);
 
     // Classic Hard DEF + Soft DEF
-    const hardDef = this.baseArmorDef + this.armorRefine * 3 + (this.classId === 'knight' ? 12 : 0);
+    const hardDef = this.baseArmorDef + this.armorRefine * 3 + (this.classId === 'knight' ? 6 : 0);
     const softDef = Math.floor(total.vit * 0.8 + Math.pow(Math.floor(total.vit / 20), 2));
     const mdef = total.int + Math.floor(total.vit / 2) + (this.endureTimer > 0 ? 15 : 0);
 
