@@ -7,6 +7,10 @@ import { DungeonFloorBuilder } from './DungeonGenerator';
 import { ElementType } from './RagnarokStatsSystem';
 import { RoomData } from '../types';
 import { MaterialFX } from '../graphics/MaterialFX';
+import { createTelegraphMaterial } from '../graphics/FXMaterials';
+
+const TELE_CIRCLE = new THREE.CircleGeometry(1, 48).rotateX(-Math.PI / 2);
+const TELE_LINE = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
 
 export type EnemyKind =
   | 'warrior'
@@ -78,6 +82,19 @@ export interface Enemy {
   windupTotal: number;
   /** Footprint radius derived from the actual model bounds (used for wall collision). */
   bodyRadius: number;
+  /** Seconds left of the rise-from-the-ground spawn animation. */
+  spawnT: number;
+  spawnBaseY: number;
+}
+
+const SPAWN_TIME = 0.65;
+const DEATH_TIME = 1.55;
+
+function lerpAngle(a: number, b: number, t: number): number {
+  let d = (b - a) % (Math.PI * 2);
+  if (d > Math.PI) d -= Math.PI * 2;
+  if (d < -Math.PI) d += Math.PI * 2;
+  return a + d * t;
 }
 
 export interface BossIdentity {
@@ -580,7 +597,13 @@ export class EnemyManager {
       bossId: identity?.bossId,
       windupTotal: 0.55,
       bodyRadius,
+      spawnT: SPAWN_TIME,
+      spawnBaseY: mesh.position.y,
     };
+    // Rise out of the floor with a dust ring instead of popping in
+    mesh.position.y = mesh.position.y - 1.9 * cfg.s;
+    this.vfx.spawnRing(new THREE.Vector3(x, 0, z), 1.6 * Math.max(1, cfg.s * 0.7), isBoss ? 0xff3355 : 0x8b7d6b, 0.5);
+    this.vfx.spawnBurst(new THREE.Vector3(x, 0.3, z), 0x9a8f80, isBoss ? 26 : 10, 3.2);
     this.enemies.push(enemy);
     return enemy;
   }
@@ -656,7 +679,7 @@ export class EnemyManager {
     if (enemy.hp <= 0) {
       enemy.hp = 0;
       enemy.dead = true;
-      enemy.deathTimer = 0.85;
+      enemy.deathTimer = DEATH_TIME;
       this.clearTelegraph(enemy);
       enemy.anim?.clearOneShot();
       enemy.anim?.playOneShot(enemy.anims.death, 0.08, 1.3, 1.2);
@@ -707,13 +730,29 @@ export class EnemyManager {
         e.deathTimer -= dt;
         if (!e.anim) {
           e.mesh.rotation.y += dt * 10;
-          e.mesh.scale.setScalar(Math.max(0.01, e.baseScale * (e.deathTimer / 0.85)));
+          e.mesh.scale.setScalar(Math.max(0.01, e.baseScale * (e.deathTimer / DEATH_TIME)));
+        }
+        // Let the death animation land, then sink through the floor (no pop-out)
+        if (e.deathTimer < 0.6) {
+          e.pos.y -= dt * (1.2 + e.baseScale * 1.4);
+          if (Math.random() < dt * 14) {
+            this.vfx.spawnTrailSpark(new THREE.Vector3(e.pos.x + (Math.random() - 0.5), 0.2, e.pos.z + (Math.random() - 0.5)), 0x9ca3af, 0.6);
+          }
         }
         if (e.deathTimer <= 0) {
           this.scene.remove(e.mesh);
           MaterialFX.release(e.mesh);
           this.enemies.splice(i, 1);
         }
+        continue;
+      }
+
+      if (e.spawnT > 0) {
+        e.spawnT = Math.max(0, e.spawnT - dt);
+        const k = 1 - e.spawnT / SPAWN_TIME;
+        const ease = 1 - Math.pow(1 - k, 3);
+        e.pos.y = e.spawnBaseY - (1 - ease) * 1.9 * e.baseScale;
+        e.anim?.playLoop(e.anims.idle, 0.1);
         continue;
       }
 
@@ -785,14 +824,10 @@ export class EnemyManager {
         if (e.telegraphMesh) {
           // Crisp crimson warning ring: pulses faster and fills in as the hit approaches
           const prog = 1 - Math.max(0, e.stateTimer) / Math.max(0.01, e.windupTotal);
-          const mat = e.telegraphMesh.material as THREE.MeshBasicMaterial;
-          mat.opacity = 0.3 + prog * 0.35 + Math.sin(performance.now() * (0.02 + prog * 0.04)) * 0.15;
-          const heat = e.isBoss ? 1.4 + prog * 2.2 : 0.9 + prog * 1.2;
-          mat.color.setRGB(heat, 0.06 * heat, 0.1 * heat);
-          if (e.kind !== 'rogue') {
-            const sc = 0.82 + prog * 0.18;
-            e.telegraphMesh.scale.set(sc, 1, sc);
-          }
+          const mat = e.telegraphMesh.material as THREE.ShaderMaterial;
+          mat.uniforms.uProgress.value = prog;
+          mat.uniforms.uTime.value = performance.now() * 0.001;
+          mat.uniforms.uHeat.value = (e.isBoss ? 1.6 : 1.0) * (1 + prog * 0.8);
         }
         if (e.stateTimer <= 0) {
           this.executeAttack(e, playerPos, onPlayerHit);
@@ -802,7 +837,8 @@ export class EnemyManager {
         }
       } else {
         // Chase / position
-        e.mesh.rotation.y = Math.atan2(dir.x, dir.z);
+        // Turn smoothly toward the target instead of snapping
+        e.mesh.rotation.y = lerpAngle(e.mesh.rotation.y, Math.atan2(dir.x, dir.z), 1 - Math.exp(-dt * 9));
         if (dist <= e.range * 0.9) {
           e.state = 'windup';
           e.stateTimer = e.isBoss ? 0.75 : e.kind === 'rogue' ? 0.65 : 0.55;
@@ -869,26 +905,22 @@ export class EnemyManager {
 
   private createTelegraph(e: Enemy, dir: THREE.Vector3): void {
     this.clearTelegraph(e);
-    const mat = new THREE.MeshBasicMaterial({
-      color: 0xff2233,
-      transparent: true,
-      opacity: 0.45,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-    });
-    if (e.kind === 'rogue') {
-      const geo = new THREE.PlaneGeometry(0.45, e.range);
-      geo.rotateX(-Math.PI / 2);
-      const mesh = new THREE.Mesh(geo, mat);
+    const isLine = e.kind === 'rogue';
+    const mat = createTelegraphMaterial(isLine);
+    mat.uniforms.uHeat.value = e.isBoss ? 1.6 : 1.0;
+    if (isLine) {
+      const mesh = new THREE.Mesh(TELE_LINE, mat);
+      mesh.scale.set(0.7, 1, e.range);
       mesh.position.set(e.pos.x + dir.x * (e.range / 2), 0.06, e.pos.z + dir.z * (e.range / 2));
-      mesh.rotation.y = Math.atan2(dir.x, dir.z);
+      mesh.rotation.y = Math.atan2(dir.x, dir.z) + Math.PI;
+      mesh.renderOrder = 2;
       this.scene.add(mesh);
       e.telegraphMesh = mesh;
     } else {
       const rad = e.isBoss ? 4.3 : e.kind === 'mage' ? 2.4 : e.range;
-      const geo = new THREE.RingGeometry(0.15, rad, 24);
-      geo.rotateX(-Math.PI / 2);
-      const mesh = new THREE.Mesh(geo, mat);
+      const mesh = new THREE.Mesh(TELE_CIRCLE, mat);
+      mesh.scale.set(rad, 1, rad);
+      mesh.renderOrder = 2;
       const tx = e.kind === 'mage' ? e.attackTarget.x : e.pos.x;
       const tz = e.kind === 'mage' ? e.attackTarget.z : e.pos.z;
       mesh.position.set(tx, 0.06, tz);
@@ -900,7 +932,7 @@ export class EnemyManager {
   private clearTelegraph(e: Enemy): void {
     if (e.telegraphMesh) {
       this.scene.remove(e.telegraphMesh);
-      e.telegraphMesh.geometry.dispose();
+      // geometry is shared (TELE_CIRCLE / TELE_LINE); only the per-attack material is freed
       (e.telegraphMesh.material as THREE.Material).dispose();
       e.telegraphMesh = null;
     }

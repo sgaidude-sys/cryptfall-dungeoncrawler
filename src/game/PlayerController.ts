@@ -58,6 +58,9 @@ export class PlayerController {
   public endowElement: ElementType | null = null;
   public endowTimer = 0;
   private auraSparkTimer = 0;
+  /** Gameplay (instant) facing vs. rendered (smoothed) facing. */
+  private logicYaw = 0;
+  private visualYaw = 0;
   private auraLight: THREE.PointLight | null = null;
   public relics: RelicId[] = [];
   public kills = 0;
@@ -385,6 +388,12 @@ export class PlayerController {
     skill4Pressed = false
   ): void {
     this.anim.update(dt);
+    // Restore the instant gameplay facing (rendering shows a smoothed version, see postUpdate)
+    if (Math.abs(this.mesh.rotation.y - this.visualYaw) > 1e-4) {
+      // something external (cutscene) rotated us — adopt it
+      this.logicYaw = this.visualYaw = this.mesh.rotation.y;
+    }
+    this.mesh.rotation.y = this.logicYaw;
     this.roStats.tickTimers(dt);
     const derived = this.getDerived();
 
@@ -1242,6 +1251,20 @@ export class PlayerController {
       this.hp += actual;
       this.vfx.spawnDamageNumber(this.pos, actual, 'heal');
     }
+  }
+
+  /** Smooth the rendered facing toward the gameplay facing (called once per frame after update). */
+  public postUpdate(dt: number): void {
+    this.logicYaw = this.mesh.rotation.y;
+    if (this.whirlwindTimer > 0) {
+      this.visualYaw = this.logicYaw;
+    } else {
+      let d = (this.logicYaw - this.visualYaw) % (Math.PI * 2);
+      if (d > Math.PI) d -= Math.PI * 2;
+      if (d < -Math.PI) d += Math.PI * 2;
+      this.visualYaw += d * (1 - Math.exp(-dt * 22));
+    }
+    this.mesh.rotation.y = this.visualYaw;
   }
 
   public destroy(): void {

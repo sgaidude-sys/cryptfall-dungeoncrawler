@@ -95,10 +95,21 @@ export class GameEngine {
   private interactQueued = false;
   private lastTime = performance.now();
   private camRight = new THREE.Vector3();
+  // Performance: dynamic resolution
+  private basePixelRatio = Math.min(window.devicePixelRatio, 1.5);
+  private renderScale = 1;
+  private frameAccum = 0;
+  private frameCount = 0;
+  // Presentation
+  private fill: THREE.PointLight;
+  private camBlend = 1;
+  private wasCutscene = false;
+  private fader: HTMLDivElement;
+  private transitioning = false;
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -118,6 +129,15 @@ export class GameEngine {
     this.vfx.onImpactKick = (amt) => this.post.kickAberration(amt * 0.02);
     this.dungeon = new DungeonFloorBuilder(this.assets);
     this.scene.add(this.dungeon.group);
+    this.scene.add(this.dungeon.lights.group);
+    // Soft key/fill light that follows the hero so characters always read clearly
+    this.fill = new THREE.PointLight(0xffe6c8, 7, 11, 1.4);
+    this.fill.userData.keepReal = true;
+    this.scene.add(this.fill);
+    // Screen fader for floor transitions
+    this.fader = document.createElement('div');
+    this.fader.style.cssText = 'position:fixed;inset:0;background:#05040a;opacity:0;pointer-events:none;z-index:35;transition:opacity 0.25s ease';
+    document.body.appendChild(this.fader);
     this.enemies = new EnemyManager(this.scene, this.assets, this.vfx, this.sound);
     this.enemies.onBossDefeated = (e) => this.onBossDefeated(e);
     this.enemies.dungeon = this.dungeon;
@@ -126,11 +146,16 @@ export class GameEngine {
       flash: (color, amt) => this.post.flash(color, amt * 0.35),
       setBiome: (id) => this.atmosphere.set(id as BiomeId),
       setBrand: (level) => this.setBrand(level),
+      setCinematic: (on) => this.post.setCinematic(on),
     };
     this.town = new TownHubSystem(this.story);
     this.audioUi = new AudioControls(this.sound);
     // Keep the letterboxed frame clean during cinematics
-    this.director.onActiveChange = (active) => this.audioUi.setVisible(!active);
+    this.director.onActiveChange = (active) => {
+      this.audioUi.setVisible(!active);
+      // UI name plates don't belong in a cinematic frame
+      this.dungeon.setOverheadVisible(!active);
+    };
 
     this.hud = new HUDManager(
       (id) => this.selectPreviewClass(id),
@@ -223,8 +248,7 @@ export class GameEngine {
       onReturnToTown: () => {
         this.activeNpc = null;
         this.phase = 'playing';
-        this.buildFloor(0);
-        this.showBanner('Oakhaven');
+        this.transitionToFloor(0);
       },
       onDialogueChoice: (opt) => this.handleDialogue(opt),
       onToggleJournal: () => this.toggleJournal(),
@@ -247,6 +271,7 @@ export class GameEngine {
     this.dungeon.generate(1);
     this.atmosphere.set('menu', true);
     this.sound.setMusicMode('town');
+    this.prewarm();
     this.loop(performance.now());
   }
 
@@ -661,8 +686,7 @@ export class GameEngine {
       case 'descend':
         this.closeModal();
         this.phase = 'playing';
-        this.buildFloor(opt.floor ?? this.story.nextStoryFloor());
-        this.showBanner(floorName(this.floor));
+        this.transitionToFloor(opt.floor ?? this.story.nextStoryFloor());
         return;
     }
   }
@@ -905,7 +929,69 @@ export class GameEngine {
 
   // ───────────────────────────── Main loop ─────────────────────────────
 
+  /** Fade out -> rebuild the floor (and pre-compile its shaders) -> fade back in. */
+  private transitionToFloor(floor: number): void {
+    if (this.transitioning) return;
+    this.transitioning = true;
+    this.sound.playCinematicWhoosh();
+    this.fader.style.transition = 'opacity 0.25s ease';
+    this.fader.style.opacity = '1';
+    window.setTimeout(() => {
+      this.buildFloor(floor);
+      this.showBanner(floorName(this.floor));
+      if (this.player) {
+        this.camera.position.set(this.player.pos.x, 14.5, this.player.pos.z + 11.5);
+        this.camera.lookAt(this.player.pos.x, 0.8, this.player.pos.z);
+      }
+      const reveal = () => {
+        this.fader.style.transition = 'opacity 0.5s ease';
+        this.fader.style.opacity = '0';
+        this.transitioning = false;
+      };
+      this.renderer.compileAsync(this.scene, this.camera).then(reveal, reveal);
+    }, 260);
+  }
+
+  /** Compile VFX shaders and upload sprite sheets up front so the first hit of combat doesn't hitch. */
+  private prewarm(): void {
+    const far = new THREE.Vector3(0, -50, 0);
+    this.vfx.spawnSlashArc(far, 0, 2.5, 0xffffff);
+    this.vfx.spawnBurst(far, 0xffffff, 2, 1);
+    this.vfx.spawnBoneShatter(far, 1);
+    this.vfx.spawnRing(far, 1, 0xffffff, 0.1);
+    for (const sheet of ['slash', 'slash_rogue', 'slash_barbarian', 'lightning', 'magic_hit', 'fire_hit', 'arrow_hit'] as const) {
+      this.vfx.spawnSpriteFX(far, sheet, 0.1);
+    }
+    try {
+      this.renderer.compile(this.scene, this.camera);
+    } catch {
+      // non-fatal
+    }
+  }
+
+  /** Lower/raise internal resolution to hold ~55-60 fps on weaker GPUs. */
+  private updateDynamicResolution(rawDt: number): void {
+    if (document.visibilityState !== 'visible' || rawDt >= 0.05) return;
+    this.frameAccum += rawDt;
+    this.frameCount++;
+    if (this.frameAccum < 1.5) return;
+    const avg = this.frameAccum / this.frameCount;
+    this.frameAccum = 0;
+    this.frameCount = 0;
+    let next = this.renderScale;
+    if (avg > 1 / 45) next = Math.max(0.6, this.renderScale - 0.1);
+    else if (avg < 1 / 57) next = Math.min(1, this.renderScale + 0.05);
+    if (Math.abs(next - this.renderScale) > 0.001) {
+      this.renderScale = next;
+      this.renderer.setPixelRatio(this.basePixelRatio * next);
+      this.post.setSize(window.innerWidth, window.innerHeight);
+    }
+  }
+
   private renderFrame(dt: number, focus: THREE.Vector3): void {
+    this.updateDynamicResolution(dt);
+    this.dungeon.setFocus(focus);
+    this.fill.position.set(focus.x, focus.y + 4.2, focus.z + 1.5);
     this.atmosphere.update(dt, focus);
     MaterialFX.update(dt);
     this.brand.update(dt);
@@ -952,15 +1038,22 @@ export class GameEngine {
 
     if (this.phase === 'playing' && this.player) {
       if (this.director.active) {
+        this.wasCutscene = true;
+        const cdt = rawDt * this.director.timeScale;
         this.hud.clearForCutscene();
-        this.player.anim.update(rawDt);
-        this.enemies.enemies.forEach((e) => e.anim?.update(rawDt));
-        this.dungeon.update(rawDt, elapsed);
+        this.player.anim.update(cdt);
+        this.enemies.enemies.forEach((e) => e.anim?.update(cdt));
+        this.dungeon.update(cdt, elapsed);
         this.sound.update(rawDt);
-        this.vfx.update(rawDt, this.camera);
+        this.vfx.update(cdt, this.camera);
         this.director.update(rawDt);
         this.renderFrame(rawDt, this.player.pos);
         return;
+      }
+      if (this.wasCutscene) {
+        // ease the gameplay camera back in instead of snapping
+        this.wasCutscene = false;
+        this.camBlend = 0;
       }
 
       // Deferred story beats (boss death → cutscene, banners after scenes)
@@ -1015,6 +1108,7 @@ export class GameEngine {
         this.enemies,
         this.skill4Queued
       );
+      this.player.postUpdate(dt);
       this.skillQueued = false;
       this.skill2Queued = false;
       this.ultQueued = false;
@@ -1093,12 +1187,16 @@ export class GameEngine {
       // Camera follow + trauma shake + FOV kick
       const shake = this.vfx.getCameraShakeOffset();
       const targetCam = new THREE.Vector3(this.player.pos.x, 14.5, this.player.pos.z + 11.5);
-      this.camera.position.lerp(targetCam, Math.min(1, rawDt * 8));
+      this.camBlend = Math.min(1, this.camBlend + rawDt * 0.8);
+      const followRate = 1.5 + 6.5 * this.camBlend * this.camBlend;
+      this.camera.position.lerp(targetCam, Math.min(1, rawDt * followRate));
       this.camera.position.add(shake);
       this.camera.lookAt(this.player.pos.x + shake.x * 0.4, 0.8, this.player.pos.z + shake.z * 0.4);
       const fov = BASE_FOV + this.vfx.getFovKick() + (this.player.roStats.quickenTimer > 0 ? 1.2 : 0);
       if (Math.abs(this.camera.fov - fov) > 0.01) {
-        this.camera.fov = fov;
+        // kicks snap in fast; everything else (e.g. leaving a cutscene) eases
+        const rate = fov > this.camera.fov && this.vfx.getFovKick() > 0.5 ? 30 : 6;
+        this.camera.fov += (fov - this.camera.fov) * Math.min(1, rawDt * rate);
         this.camera.updateProjectionMatrix();
       }
 
@@ -1195,8 +1293,7 @@ export class GameEngine {
       this.hud.showRelicDraft(pickRandomRelics(p.relics, 3));
     } else if (item.kind === 'trapdoor') {
       this.sound.playChestChime();
-      this.buildFloor(Math.min(99, this.floor + 1));
-      this.showBanner(floorName(this.floor));
+      this.transitionToFloor(Math.min(99, this.floor + 1));
     } else if (item.kind === 'echo' && item.echoId) {
       const def = this.story.collectEcho(item.echoId);
       item.mesh.visible = false;

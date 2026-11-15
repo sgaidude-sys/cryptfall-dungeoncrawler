@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { RODamageNumbers, RODamageStyle } from '../ui/RODamageNumbers';
+import { ChunkField, SparkField } from '../graphics/ParticleSystem';
+import { createSlashMaterial } from '../graphics/FXMaterials';
 
 interface Particle {
   mesh: THREE.Mesh;
@@ -15,6 +17,8 @@ interface SlashArc {
   life: number;
   maxLife: number;
   startYaw: number;
+  sharedGeo?: boolean;
+  shader?: THREE.ShaderMaterial;
 }
 
 interface RingEffect {
@@ -32,7 +36,8 @@ interface BeamEffect {
 
 interface SpriteAnim {
   mesh: THREE.Mesh;
-  tex: THREE.Texture;
+  uv: THREE.BufferAttribute;
+  lastFrame: number;
   cols: number;
   rows: number;
   frames: number;
@@ -91,14 +96,18 @@ export class VFXManager {
   /** Optional hooks so juice can drive post-FX (chromatic kick / screen flash) and audio. */
   public onImpactKick?: (amount: number) => void;
 
-  private boxGeo = new THREE.BoxGeometry(0.18, 0.12, 0.28);
-  private sparkGeo = new THREE.OctahedronGeometry(0.12, 0);
   private ringGeo = new THREE.RingGeometry(0.65, 1.0, 28);
+  /** Pooled single-draw-call particle systems. */
+  private sparks: SparkField;
+  private chunks: ChunkField;
+  private slashGeoCache = new Map<string, THREE.RingGeometry>();
   public roDmg = new RODamageNumbers();
   private castCircleMesh: THREE.Mesh | null = null;
 
   constructor(private scene: THREE.Scene) {
     this.ringGeo.rotateX(-Math.PI / 2);
+    this.sparks = new SparkField(scene, 2400);
+    this.chunks = new ChunkField(scene, 320);
   }
 
   public triggerHitStop(seconds = 0.04): void {
@@ -147,23 +156,21 @@ export class VFXManager {
   ): void {
     const arcAngle = arcAngleOverride ?? (fullCircle ? Math.PI * 1.9 : Math.PI * 0.78);
     const innerR = arcAngleOverride && arcAngleOverride < 1.3 ? radius * 0.68 : radius * 0.48;
-    const geo = new THREE.RingGeometry(innerR, radius, 24, 1, -arcAngle / 2, arcAngle);
-    geo.rotateX(-Math.PI / 2);
-    const mat = new THREE.MeshBasicMaterial({
-      color: colorHex,
-      transparent: true,
-      opacity: 0.95,
-      side: THREE.DoubleSide,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    });
+    const key = `${innerR.toFixed(2)}|${radius.toFixed(2)}|${arcAngle.toFixed(3)}`;
+    let geo = this.slashGeoCache.get(key);
+    if (!geo) {
+      geo = new THREE.RingGeometry(innerR, radius, 32, 1, -arcAngle / 2, arcAngle);
+      geo.rotateX(-Math.PI / 2);
+      this.slashGeoCache.set(key, geo);
+    }
+    const mat = createSlashMaterial(colorHex, innerR, radius, -arcAngle / 2, arcAngle);
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set(pos.x, pos.y + 1.1, pos.z);
     mesh.rotation.order = 'YXZ';
     mesh.rotation.y = yaw - Math.PI / 2 - 0.35;
     mesh.rotation.x = fullCircle ? 0.05 : tilt;
     this.scene.add(mesh);
-    this.slashes.push({ mesh, life: duration, maxLife: duration, startYaw: mesh.rotation.y });
+    this.slashes.push({ mesh, life: duration * 1.25, maxLife: duration * 1.25, startYaw: mesh.rotation.y, sharedGeo: true, shader: mat });
   }
 
   public spawnRing(pos: THREE.Vector3, maxScale: number, colorHex: number, duration = 0.35): void {
@@ -183,59 +190,12 @@ export class VFXManager {
   }
 
   public spawnBoneShatter(pos: THREE.Vector3, count = 16): void {
-    for (let i = 0; i < count; i++) {
-      const mat = new THREE.MeshStandardMaterial({
-        color: i % 3 === 0 ? 0xcfd6c4 : 0xe8e2d0,
-        roughness: 0.6,
-      });
-      const mesh = new THREE.Mesh(this.boxGeo, mat);
-      mesh.position.set(
-        pos.x + (Math.random() - 0.5) * 0.5,
-        pos.y + 0.6 + Math.random() * 0.8,
-        pos.z + (Math.random() - 0.5) * 0.5
-      );
-      mesh.scale.setScalar(0.7 + Math.random() * 0.7);
-      this.scene.add(mesh);
-      const angle = Math.random() * Math.PI * 2;
-      const spd = 2.5 + Math.random() * 4.5;
-      this.particles.push({
-        mesh,
-        vel: new THREE.Vector3(Math.cos(angle) * spd, 3.2 + Math.random() * 4.5, Math.sin(angle) * spd),
-        life: 0.7 + Math.random() * 0.35,
-        maxLife: 1.0,
-        gravity: 16,
-        spin: new THREE.Vector3(Math.random() * 12, Math.random() * 12, Math.random() * 12),
-      });
-    }
+    this.chunks.shatter(pos, count);
+    this.sparks.burst(pos.clone().setY(pos.y + 0.8), 0xd6d3c4, Math.round(count * 0.6), 3.5);
   }
 
   public spawnBurst(pos: THREE.Vector3, colorHex: number, count = 14, speed = 5.5): void {
-    for (let i = 0; i < count; i++) {
-      const mat = new THREE.MeshBasicMaterial({
-        color: colorHex,
-        transparent: true,
-        opacity: 1,
-        blending: THREE.AdditiveBlending,
-      });
-      const mesh = new THREE.Mesh(this.sparkGeo, mat);
-      mesh.position.copy(pos);
-      this.scene.add(mesh);
-      const theta = Math.random() * Math.PI * 2;
-      const phi = Math.random() * Math.PI * 0.7;
-      const spd = speed * (0.4 + Math.random() * 0.8);
-      this.particles.push({
-        mesh,
-        vel: new THREE.Vector3(
-          Math.cos(theta) * Math.sin(phi) * spd,
-          Math.cos(phi) * spd + 1.5,
-          Math.sin(theta) * Math.sin(phi) * spd
-        ),
-        life: 0.35 + Math.random() * 0.25,
-        maxLife: 0.55,
-        gravity: 9,
-        spin: new THREE.Vector3(6, 8, 5),
-      });
-    }
+    this.sparks.burst(pos, colorHex, count, speed);
   }
 
   public spawnDashTrail(from: THREE.Vector3, to: THREE.Vector3, colorHex: number, steps = 6): void {
@@ -408,24 +368,18 @@ export class VFXManager {
   }
 
   public spawnTrailSpark(pos: THREE.Vector3, colorHex: number, scale = 0.7): void {
-    const mat = new THREE.MeshBasicMaterial({
-      color: colorHex,
-      transparent: true,
-      opacity: 0.85,
-      blending: THREE.AdditiveBlending,
-    });
-    const mesh = new THREE.Mesh(this.sparkGeo, mat);
-    mesh.position.copy(pos);
-    mesh.scale.setScalar(scale);
-    this.scene.add(mesh);
-    this.particles.push({
-      mesh,
-      vel: new THREE.Vector3((Math.random() - 0.5) * 0.8, 0.4, (Math.random() - 0.5) * 0.8),
-      life: 0.18,
-      maxLife: 0.18,
-      gravity: 0,
-      spin: new THREE.Vector3(4, 4, 4),
-    });
+    this.sparks.emit(
+      pos.x,
+      pos.y,
+      pos.z,
+      (Math.random() - 0.5) * 0.8,
+      0.6 + Math.random() * 0.5,
+      (Math.random() - 0.5) * 0.8,
+      colorHex,
+      0.28,
+      0.22 * scale + 0.06,
+      -0.5
+    );
   }
 
   public spawnSpriteFX(
@@ -451,14 +405,10 @@ export class VFXManager {
       baseTex.minFilter = THREE.NearestFilter;
       this.sheetCache.set(sheetName, baseTex);
     }
-    const tex = baseTex.clone();
-    tex.needsUpdate = true;
-    tex.repeat.set(1 / cfg.cols, 1 / cfg.rows);
-    tex.offset.set(0, 1 - 1 / cfg.rows);
-
     const geo = new THREE.PlaneGeometry(size, size);
+    const uv = geo.getAttribute('uv') as THREE.BufferAttribute;
     const mat = new THREE.MeshBasicMaterial({
-      map: tex,
+      map: baseTex,
       color: colorHex,
       transparent: true,
       blending: THREE.AdditiveBlending,
@@ -468,7 +418,25 @@ export class VFXManager {
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set(pos.x, pos.y + 1.15, pos.z);
     this.scene.add(mesh);
-    this.sprites.push({ mesh, tex, cols: cfg.cols, rows: cfg.rows, frames: cfg.frames, life: cfg.dur, maxLife: cfg.dur });
+    this.sprites.push({ mesh, uv, lastFrame: -1, cols: cfg.cols, rows: cfg.rows, frames: cfg.frames, life: cfg.dur, maxLife: cfg.dur });
+    this.setSpriteFrame(this.sprites[this.sprites.length - 1], 0);
+  }
+
+  private setSpriteFrame(sp: SpriteAnim, frame: number): void {
+    if (sp.lastFrame === frame) return;
+    sp.lastFrame = frame;
+    const col = frame % sp.cols;
+    const row = Math.floor(frame / sp.cols);
+    const u0 = col / sp.cols;
+    const u1 = (col + 1) / sp.cols;
+    const v1 = 1 - row / sp.rows;
+    const v0 = 1 - (row + 1) / sp.rows;
+    // PlaneGeometry uv order: (0,1) (1,1) (0,0) (1,0)
+    sp.uv.setXY(0, u0, v1);
+    sp.uv.setXY(1, u1, v1);
+    sp.uv.setXY(2, u0, v0);
+    sp.uv.setXY(3, u1, v0);
+    sp.uv.needsUpdate = true;
   }
 
   public spawnLightningArc(from: THREE.Vector3, to: THREE.Vector3, colorHex = 0x7dd3fc): void {
@@ -570,6 +538,9 @@ export class VFXManager {
     this.fovKick *= Math.pow(0.002, dt);
     if (Math.abs(this.fovKick) < 0.01) this.fovKick = 0;
 
+    this.sparks.update(dt);
+    this.chunks.update(dt);
+
     // Particles
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];
@@ -600,15 +571,24 @@ export class VFXManager {
       s.life -= dt;
       if (s.life <= 0) {
         this.scene.remove(s.mesh);
-        s.mesh.geometry.dispose();
+        if (!s.sharedGeo) s.mesh.geometry.dispose();
         (s.mesh.material as THREE.Material).dispose();
         this.slashes.splice(i, 1);
         continue;
       }
       const t = 1 - s.life / s.maxLife;
-      s.mesh.rotation.y = s.startYaw + t * 1.05;
-      s.mesh.scale.setScalar(0.92 + t * 0.28);
-      (s.mesh.material as THREE.MeshBasicMaterial).opacity = (1 - t) * 0.95;
+      if (s.shader) {
+        // fast ease-out sweep, then the trail dissolves
+        const sweep = 1 - Math.pow(1 - Math.min(1, t * 2.2), 3);
+        s.mesh.rotation.y = s.startYaw + sweep * 0.9;
+        s.mesh.scale.setScalar(0.94 + sweep * 0.12);
+        s.shader.uniforms.uSweep.value = sweep * 1.2;
+        s.shader.uniforms.uOpacity.value = t < 0.45 ? 1 : Math.max(0, 1 - (t - 0.45) / 0.55);
+      } else {
+        s.mesh.rotation.y = s.startYaw + t * 1.05;
+        s.mesh.scale.setScalar(0.92 + t * 0.28);
+        (s.mesh.material as THREE.MeshBasicMaterial).opacity = (1 - t) * 0.95;
+      }
     }
 
     // Rings
@@ -648,15 +628,11 @@ export class VFXManager {
         this.scene.remove(sp.mesh);
         sp.mesh.geometry.dispose();
         (sp.mesh.material as THREE.Material).dispose();
-        sp.tex.dispose();
         this.sprites.splice(i, 1);
         continue;
       }
       const t = 1 - sp.life / sp.maxLife;
-      const frame = Math.min(sp.frames - 1, Math.floor(t * sp.frames));
-      const col = frame % sp.cols;
-      const row = Math.floor(frame / sp.cols);
-      sp.tex.offset.set(col / sp.cols, 1 - (row + 1) / sp.rows);
+      this.setSpriteFrame(sp, Math.min(sp.frames - 1, Math.floor(t * sp.frames)));
       sp.mesh.quaternion.copy(camera.quaternion);
     }
 

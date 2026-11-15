@@ -12,6 +12,7 @@ export interface DirectorHooks {
   flash?: (color: number, amount: number) => void;
   setBiome?: (id: 'town' | 'town_dawn' | 'crypt' | 'ruins' | 'spire' | 'abyss') => void;
   setBrand?: (level: number) => void;
+  setCinematic?: (on: boolean) => void;
 }
 
 /** Semantic cue -> candidate clip names (first one the rig owns wins). */
@@ -107,7 +108,6 @@ export class CutsceneDirector {
   private splineTween: SplineTween | null = null;
   private orbitTween: OrbitTween | null = null;
   private fovTween: { startFov: number; endFov: number; elapsed: number; duration: number } | null = null;
-  private tempLights: THREE.PointLight[] = [];
   private namedLights = new Map<string, THREE.PointLight>();
   private lightTweens: LightTween[] = [];
   private chains = new Map<string, ChainSet>();
@@ -120,6 +120,16 @@ export class CutsceneDirector {
   private origin = new THREE.Vector3();
 
   public overlay = new CutsceneOverlay();
+  /** Cinematic time scale (slow-motion impact frames); the engine also applies it to VFX/anims. */
+  public timeScale = 1;
+  private slowTimer = 0;
+  /** Fixed set of real lights reused by every cutscene (constant light count = no shader recompiles). */
+  private lightSlots: THREE.PointLight[] = [];
+  private slotCursor = 0;
+  private sway = new THREE.Vector3();
+  private swayT = 0;
+  private talking = false;
+  private shakeT = 0;
   public hooks: DirectorHooks = {};
   /** Fired when any cutscene starts/ends (HUD hiding, audio widget, etc.). */
   public onActiveChange?: (active: boolean) => void;
@@ -142,6 +152,30 @@ export class CutsceneDirector {
     }
 
     this.overlay.onSkip = () => this.skip();
+    for (let i = 0; i < 3; i++) {
+      const l = new THREE.PointLight(0xffffff, 0, 14, 1.6);
+      l.userData.keepReal = true;
+      this.scene.add(l);
+      this.lightSlots.push(l);
+    }
+  }
+
+  private takeLightSlot(): THREE.PointLight {
+    const inUse = new Set(this.namedLights.values());
+    let slot = this.lightSlots.find((l) => !inUse.has(l) && l.intensity === 0);
+    if (!slot) {
+      slot = this.lightSlots[this.slotCursor % this.lightSlots.length];
+      this.slotCursor++;
+      for (const [k, v] of this.namedLights) if (v === slot) this.namedLights.delete(k);
+    }
+    return slot;
+  }
+
+  /** Brief slow-motion beat (time scale for `realSeconds`). */
+  public slowMo(scale: number, realSeconds: number): void {
+    if (this.aborted) return;
+    this.timeScale = scale;
+    this.slowTimer = realSeconds;
   }
 
   public hasPlayed(id: string): boolean {
@@ -247,6 +281,8 @@ export class CutsceneDirector {
     this.sound.playCinematicWhoosh();
     this.sound.setCutsceneMusic(true);
     this.onActiveChange?.(true);
+    this.hooks.setCinematic?.(true);
+    this.sway.set(0, 0, 0);
 
     try {
       await scriptFn(this);
@@ -257,6 +293,9 @@ export class CutsceneDirector {
       this.cleanup();
       this.sound.setCutsceneMusic(false);
       this.active = false;
+      this.timeScale = 1;
+      this.slowTimer = 0;
+      this.hooks.setCinematic?.(false);
       this.onActiveChange?.(false);
       const cb = this.onFinish;
       this.onFinish = undefined;
@@ -332,9 +371,9 @@ export class CutsceneDirector {
     this.fovTween = null;
     this.camera.fov = 48;
     this.camera.updateProjectionMatrix();
-    for (const l of this.tempLights) this.scene.remove(l);
-    this.tempLights = [];
+    for (const l of this.lightSlots) l.intensity = 0;
     this.namedLights.clear();
+    this.talking = false;
     this.lightTweens = [];
     for (const c of this.chains.values()) this.scene.remove(c.group);
     this.chains.clear();
@@ -452,13 +491,12 @@ export class CutsceneDirector {
         return;
       case 'light': {
         if (this.aborted) return;
-        const old = this.namedLights.get(b.id);
-        if (old) this.scene.remove(old);
-        const l = new THREE.PointLight(b.color, b.intensity, b.dist ?? 14, 1.6);
+        const l = this.namedLights.get(b.id) ?? this.takeLightSlot();
+        l.color.setHex(b.color);
+        l.intensity = b.intensity;
+        l.distance = b.dist ?? 14;
         l.position.copy(this.v(b.at));
         l.userData.baseDist = b.dist ?? 14;
-        this.scene.add(l);
-        this.tempLights.push(l);
         this.namedLights.set(b.id, l);
         return;
       }
@@ -487,7 +525,13 @@ export class CutsceneDirector {
         return;
       case 'lightning':
         this.spawnLightningStrike(this.v(b.from), this.v(b.to), b.color);
-        if (!this.aborted) this.sound.playLightning(1);
+        if (!this.aborted) {
+          this.sound.playLightning(1);
+          this.hooks.flash?.(b.color, 0.5);
+          this.vfx.spawnRing(this.v(b.to), 3.2, b.color, 0.45);
+          this.vfx.spawnBurst(this.v(b.to).add(new THREE.Vector3(0, 0.4, 0)), b.color, 30, 7);
+          this.shakeCamera(0.28, 0.35);
+        }
         return;
       case 'chains':
         this.spawnChains(b.id, this.v(b.from), b.to.map((t) => this.v(t)), b.color ?? 0xa855f7);
@@ -496,7 +540,10 @@ export class CutsceneDirector {
         this.breakChains(b.id);
         return;
       case 'flash':
-        if (!this.aborted) this.hooks.flash?.(b.color, b.amt);
+        if (!this.aborted) {
+          this.hooks.flash?.(b.color, b.amt);
+          if (b.amt >= 1.2) this.slowMo(0.3, 0.45);
+        }
         return;
       case 'music':
         // 'cutscene' is handled by play(); other modes become the mode we restore to afterwards
@@ -575,6 +622,7 @@ export class CutsceneDirector {
 
   public moveCameraTo(pos: THREE.Vector3, lookAt: THREE.Vector3, duration: number): Promise<void> {
     if (this.aborted || duration <= 0.01) {
+      this.sway.set(0, 0, 0);
       this.camera.position.copy(pos);
       this.currentLook.copy(lookAt);
       this.camera.lookAt(lookAt);
@@ -603,6 +651,7 @@ export class CutsceneDirector {
         : look[0].clone()
       : look.clone();
     if (this.aborted || duration <= 0.01) {
+      this.sway.set(0, 0, 0);
       this.camera.position.copy(pts[pts.length - 1]);
       this.currentLook.copy(lookTarget instanceof THREE.Vector3 ? lookTarget : lookTarget.getPointAt(1));
       this.camera.lookAt(this.currentLook);
@@ -695,10 +744,13 @@ export class CutsceneDirector {
 
   public spawnDramaticLight(pos: THREE.Vector3, colorHex: number, intensity = 14, distance = 14): void {
     if (this.aborted) return;
-    const light = new THREE.PointLight(colorHex, intensity, distance);
+    const light = this.takeLightSlot();
+    light.color.setHex(colorHex);
+    light.intensity = intensity;
+    light.distance = distance;
+    light.userData.baseDist = distance;
     light.position.copy(pos);
-    this.scene.add(light);
-    this.tempLights.push(light);
+    this.namedLights.set(`_dramatic_${this.slotCursor++}`, light);
   }
 
   public spawnEpicRitual(pos: THREE.Vector3, colorHex: number): void {
@@ -779,7 +831,10 @@ export class CutsceneDirector {
   ): Promise<void> {
     if (this.aborted) return Promise.resolve();
     this.sound.playUIPopup();
-    return this.overlay.say(speakerName, speakerTitle, portraitTintHex, text, typewriterSpeed);
+    this.talking = true;
+    return this.overlay.say(speakerName, speakerTitle, portraitTintHex, text, typewriterSpeed).then(() => {
+      this.talking = false;
+    });
   }
 
   public showChapterCard(actNumber: string, title: string, subtitle: string, duration = 2.6): Promise<void> {
@@ -802,8 +857,15 @@ export class CutsceneDirector {
 
   // ───────────────────────────── Tick ─────────────────────────────
 
-  public update(dt: number): void {
+  public update(realDt: number): void {
     if (!this.active) return;
+    if (this.slowTimer > 0) {
+      this.slowTimer -= realDt;
+      if (this.slowTimer <= 0) this.timeScale = 1;
+    }
+    const dt = realDt * this.timeScale;
+    // remove last frame's handheld offset before tweens write the camera
+    this.camera.position.sub(this.sway);
 
     for (const a of this.actors.values()) {
       if (a.isTemp) a.anim?.update(dt);
@@ -870,12 +932,31 @@ export class CutsceneDirector {
       if (p >= 1) this.fovTween = null;
     }
 
+    // Slow push-in while a line of dialogue is on screen and the camera is otherwise static
+    const camIdle = !this.camTween && !this.splineTween && !this.orbitTween;
+    if (camIdle && this.talking) {
+      const toLook = this.currentLook.clone().sub(this.camera.position);
+      const dist = toLook.length();
+      if (dist > 5.5) this.camera.position.addScaledVector(toLook.normalize(), Math.min(0.15, dist * 0.02) * dt);
+    }
+
+    // Handheld drift + smooth (noise-like) shake, applied as a removable offset
+    this.swayT += dt;
+    const t = this.swayT;
+    this.sway.set(
+      Math.sin(t * 0.7) * 0.05 + Math.sin(t * 1.9 + 1.3) * 0.02,
+      Math.sin(t * 0.9 + 2.1) * 0.035,
+      Math.sin(t * 0.6 + 4.2) * 0.04
+    );
     if (this.shakeTimer > 0) {
       this.shakeTimer -= dt;
-      const k = Math.max(0, this.shakeTimer) * this.shakeIntensity;
-      this.camera.position.x += (Math.random() - 0.5) * k;
-      this.camera.position.y += (Math.random() - 0.5) * k;
+      this.shakeT += realDt * 42;
+      const k = Math.min(1, Math.max(0, this.shakeTimer) * 2.5) * this.shakeIntensity;
+      this.sway.x += (Math.sin(this.shakeT) * 0.6 + Math.sin(this.shakeT * 2.3 + 1.7) * 0.4) * k;
+      this.sway.y += (Math.sin(this.shakeT * 1.3 + 0.5) * 0.6 + Math.sin(this.shakeT * 2.9) * 0.4) * k * 0.7;
     }
+    this.camera.position.add(this.sway);
+    this.camera.lookAt(this.currentLook);
 
     // Light colour/intensity shifts + subtle radius jitter on every cutscene light
     for (let i = this.lightTweens.length - 1; i >= 0; i--) {

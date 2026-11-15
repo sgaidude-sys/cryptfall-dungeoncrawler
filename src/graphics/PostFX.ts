@@ -161,22 +161,33 @@ export class PostFX {
     this.aberrationKick = Math.min(0.06, this.aberrationKick + amount);
   }
 
+  private cine = 0;
+  private cineTarget = 0;
+
+  /** Cinematic grade for cutscenes: deeper vignette, punchier contrast, richer bloom, film grain. */
+  public setCinematic(on: boolean): void {
+    this.cineTarget = on ? 1 : 0;
+  }
+
   private applyLerp(k: number): void {
     if (!this.target) return;
     const u = this.grade.uniforms;
+    const c = this.cine;
     (u.uTint.value as THREE.Color).lerp(this.target.tint, k);
     (u.uShadowTint.value as THREE.Color).lerp(this.target.shadowTint, k);
     (u.uVignetteColor.value as THREE.Color).lerp(this.target.vignetteColor, k);
-    u.uSaturation.value += (this.target.saturation - u.uSaturation.value) * k;
-    u.uContrast.value += (this.target.contrast - u.uContrast.value) * k;
-    u.uVignette.value += (this.target.vignette - u.uVignette.value) * k;
-    this.bloom.strength += (this.target.bloomStrength - this.bloom.strength) * k;
+    u.uSaturation.value += (this.target.saturation * (1 - c * 0.05) - u.uSaturation.value) * k;
+    u.uContrast.value += (this.target.contrast * (1 + c * 0.1) - u.uContrast.value) * k;
+    u.uVignette.value += (this.target.vignette + c * 0.3 - u.uVignette.value) * k;
+    u.uGrain.value += (0.03 + c * 0.03 - u.uGrain.value) * k;
+    this.bloom.strength += (this.target.bloomStrength + c * 0.2 - this.bloom.strength) * k;
     this.bloom.radius += (this.target.bloomRadius - this.bloom.radius) * k;
     this.bloom.threshold += (this.target.bloomThreshold - this.bloom.threshold) * k;
     this.renderer.toneMappingExposure += (this.target.exposure - this.renderer.toneMappingExposure) * k;
   }
 
   public update(dt: number): void {
+    this.cine += (this.cineTarget - this.cine) * Math.min(1, dt * 2.5);
     this.applyLerp(Math.min(1, dt * 2.2));
     const u = this.grade.uniforms;
     u.uTime.value += dt;
@@ -184,7 +195,7 @@ export class PostFX {
     if (this.flashValue < 0.002) this.flashValue = 0;
     u.uFlash.value = this.flashValue;
     this.aberrationKick *= Math.pow(0.004, dt);
-    u.uAberration.value = this.baseAberration + this.aberrationKick;
+    u.uAberration.value = this.baseAberration + this.cine * 0.005 + this.aberrationKick;
   }
 
   public render(): void {

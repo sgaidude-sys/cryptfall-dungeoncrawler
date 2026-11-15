@@ -3,6 +3,8 @@ import { AssetManager } from '../assets/AssetManager';
 import { AnimatorHelper } from '../engine/AnimatorHelper';
 import { RoomData, TownNpcId } from '../types';
 import type { TownView, TownNpcView } from '../systems/TownHubSystem';
+import { LightPool } from '../graphics/LightPool';
+import { batchStaticMeshes } from '../graphics/StaticBatcher';
 
 export const TILE = 4.0;
 export const ROOM_STEP = 28.0;
@@ -77,6 +79,13 @@ export class DungeonFloorBuilder {
   public npcActors = new Map<TownNpcId, { mesh: THREE.Object3D; anim?: AnimatorHelper }>();
   /** World positions of the town's set-pieces (for cutscene origins / effects). */
   public obeliskTop = new THREE.Vector3(0, 3.4, -5.2);
+  /** Constant set of real point lights fed by every torch/brazier/shrine light in the level. */
+  public lights = new LightPool(7);
+  private focus = new THREE.Vector3();
+  /** Draw-call stats for the last build (debug/profiling). */
+  public batchedObjects = 0;
+  /** World-space name plates / quest markers (hidden during cinematics). */
+  private overheadSprites: THREE.Sprite[] = [];
   public gatesLocked = false;
   public lockedRoom: RoomData | null = null;
   private gateLerp = 0;
@@ -87,6 +96,7 @@ export class DungeonFloorBuilder {
     this.clear();
     if (floorNum === 0) {
       this.buildOakhavenTown(town);
+      this.finalizeBuild();
       return;
     }
 
@@ -168,6 +178,28 @@ export class DungeonFloorBuilder {
 
     this.rooms = list;
     this.buildGeometry(grid, floorNum);
+    this.finalizeBuild();
+  }
+
+  public setOverheadVisible(v: boolean): void {
+    for (const s of this.overheadSprites) s.visible = v;
+  }
+
+  public setFocus(v: THREE.Vector3): void {
+    this.focus.copy(v);
+  }
+
+  /** Merge static geometry and hand all level lights to the pool. */
+  private finalizeBuild(): void {
+    const exclude = new Set<THREE.Object3D>();
+    for (const g of this.doorGates) if (g.parent) exclude.add(g.parent);
+    for (const t of this.traps) exclude.add(t.mesh);
+    for (const it of this.interactables) exclude.add(it.mesh);
+    for (const a of this.npcActors.values()) exclude.add(a.mesh);
+    for (const b of this.bobbers) exclude.add(b.obj);
+    for (const t of this.torches) if (t.flame?.parent) exclude.add(t.flame.parent);
+    this.batchedObjects = batchStaticMeshes(this.group, exclude, 10);
+    this.lights.adoptFrom(this.group);
   }
 
   private buildGeometry(grid: Map<string, RoomData>, floorNum: number): void {
@@ -200,20 +232,20 @@ export class DungeonFloorBuilder {
     }
 
     // Apply Biome Tinting to reused dungeon meshes
-    if (floorNum === 2) {
-      // Floor 2: Overgrown Subterranean Ruins (emerald moss tint)
+    if (floorNum >= 2) {
+      // Floor 2: emerald moss tint · Floor 3+: obsidian & crimson tint.
+      // One tinted copy per source material (not per mesh) so draw calls can still be batched.
+      const tint = new THREE.Color(floorNum === 2 ? 0x9be7b0 : 0x8b6ba8);
+      const cache = new Map<THREE.Material, THREE.MeshStandardMaterial>();
       this.group.traverse((obj) => {
         if (obj instanceof THREE.Mesh && obj.material instanceof THREE.MeshStandardMaterial) {
-          obj.material = obj.material.clone();
-          obj.material.color.multiply(new THREE.Color(0x9be7b0));
-        }
-      });
-    } else if (floorNum >= 3) {
-      // Floor 3+: Obsidian Spire Core (obsidian & crimson tint)
-      this.group.traverse((obj) => {
-        if (obj instanceof THREE.Mesh && obj.material instanceof THREE.MeshStandardMaterial) {
-          obj.material = obj.material.clone();
-          obj.material.color.multiply(new THREE.Color(0x8b6ba8));
+          let m = cache.get(obj.material);
+          if (!m) {
+            m = obj.material.clone();
+            m.color.multiply(tint);
+            cache.set(obj.material, m);
+          }
+          obj.material = m;
         }
       });
     }
@@ -335,9 +367,6 @@ export class DungeonFloorBuilder {
     this.group.add(bonfire);
     const hearth = new THREE.PointLight(0xff9a3c, dawn ? 10 : 22, 20, 1.5);
     hearth.position.set(0, 1.6, 3.6);
-    hearth.castShadow = true;
-    hearth.shadow.mapSize.set(512, 512);
-    hearth.shadow.bias = -0.002;
     this.group.add(hearth);
     this.torches.push({ light: hearth, baseIntensity: hearth.intensity, baseDistance: 20, seed: 1.7, flame: flameA });
     this.obstacles.push({ x: 0, z: 3.6, r: 1.0 });
@@ -388,11 +417,13 @@ export class DungeonFloorBuilder {
       const labelSprite = this.createNpcLabelSprite(n.tag, n.color);
       labelSprite.position.set(L.x, 2.75, L.z);
       this.group.add(labelSprite);
+      this.overheadSprites.push(labelSprite);
 
       if (n.marker) {
         const marker = this.createMarkerSprite(n.marker);
         marker.position.set(L.x, 3.55, L.z);
         this.group.add(marker);
+        this.overheadSprites.push(marker);
         this.bobbers.push({ obj: marker, baseY: 3.55, speed: 3.2, amp: 0.16, spin: 0 });
       }
 
@@ -886,6 +917,13 @@ export class DungeonFloorBuilder {
   }
 
   public update(dt: number, elapsed: number): void {
+    // Lights added after the build (chests, shrines, echo shards...) join the pool
+    for (const c of this.group.children) {
+      if (c instanceof THREE.PointLight) {
+        this.lights.adoptFrom(this.group);
+        break;
+      }
+    }
     for (const anim of this.npcAnimators) {
       anim.update(dt);
     }
@@ -923,6 +961,8 @@ export class DungeonFloorBuilder {
       trap.mesh.position.y += (targetY - trap.mesh.position.y) * Math.min(1, dt * 16);
     }
 
+    this.lights.update(this.focus);
+
     // Pulse shrines
     for (const item of this.interactables) {
       if (item.kind === 'shrine' && !item.used) {
@@ -932,6 +972,10 @@ export class DungeonFloorBuilder {
   }
 
   public clear(): void {
+    // Merged static batches own their geometry; free it so floor changes don't leak GPU memory
+    for (const c of this.group.children) {
+      if (c instanceof THREE.Mesh && c.userData.batched) c.geometry.dispose();
+    }
     while (this.group.children.length > 0) {
       this.group.remove(this.group.children[0]);
     }
@@ -946,6 +990,8 @@ export class DungeonFloorBuilder {
     this.bobbers = [];
     this.pulseMats = [];
     this.npcActors.clear();
+    this.lights.clear();
+    this.overheadSprites = [];
     this.gatesLocked = false;
     this.lockedRoom = null;
     this.gateLerp = 1;
