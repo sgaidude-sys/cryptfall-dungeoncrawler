@@ -84,7 +84,12 @@ export class VFXManager {
   private hitStopTimer = 0;
   private shakeOffset = new THREE.Vector3();
   private shakeVel = new THREE.Vector3();
-  private shakeIntensity = 0;
+  /** Trauma-based shake (0..1); offset scales with trauma^2 for a punchy-but-short feel. */
+  private trauma = 0;
+  private shakeTime = 0;
+  private fovKick = 0;
+  /** Optional hooks so juice can drive post-FX (chromatic kick / screen flash) and audio. */
+  public onImpactKick?: (amount: number) => void;
 
   private boxGeo = new THREE.BoxGeometry(0.18, 0.12, 0.28);
   private sparkGeo = new THREE.OctahedronGeometry(0.12, 0);
@@ -109,8 +114,21 @@ export class VFXManager {
   }
 
   public addCameraShake(dir: THREE.Vector3, intensity: number): void {
-    this.shakeIntensity = Math.min(0.85, this.shakeIntensity + intensity);
-    this.shakeVel.copy(dir).normalize().multiplyScalar(intensity * 1.4);
+    this.trauma = Math.min(1, this.trauma + intensity * 1.25);
+    if (dir.lengthSq() > 0.0001) {
+      // Directional kick: camera is shoved along the impact direction, then springs back
+      this.shakeVel.copy(dir).setY(0).normalize().multiplyScalar(intensity * 1.6);
+    }
+    if (intensity >= 0.2) this.onImpactKick?.(intensity);
+  }
+
+  /** Brief FOV punch (degrees, positive widens) for dashes, flurries and explosions. */
+  public kickFov(degrees: number): void {
+    this.fovKick = Math.max(-12, Math.min(14, this.fovKick + degrees));
+  }
+
+  public getFovKick(): number {
+    return this.fovKick;
   }
 
   public getCameraShakeOffset(): THREE.Vector3 {
@@ -492,11 +510,16 @@ export class VFXManager {
       this.scene.add(this.castCircleMesh);
     }
     const mat = this.castCircleMesh.material as THREE.MeshBasicMaterial;
-    mat.color.setHex(colorHex);
+    const p = Math.min(1, Math.max(0, progress));
+    // Brighten toward white-hot as DEX cast progress approaches 100% (HDR > 1 feeds the bloom)
+    mat.color.setHex(colorHex).multiplyScalar(0.8 + p * p * 2.6);
+    mat.opacity = 0.55 + p * 0.45;
     this.castCircleMesh.visible = true;
     this.castCircleMesh.position.set(pos.x, 0.08, pos.z);
-    this.castCircleMesh.rotation.y += 0.04;
-    const s = 0.45 + Math.min(1, progress) * 0.85;
+    // Rune spins faster as the spell nears completion
+    this.castCircleMesh.rotation.y += 0.025 + p * 0.09;
+    const pulse = p > 0.9 ? 1 + Math.sin(performance.now() * 0.04) * 0.04 : 1;
+    const s = (0.45 + p * 0.95) * pulse;
     this.castCircleMesh.scale.setScalar(s);
   }
 
@@ -529,18 +552,23 @@ export class VFXManager {
   public update(dt: number, camera: THREE.Camera): void {
     this.roDmg.update(dt, camera);
     // Update camera shake
-    if (this.shakeIntensity > 0.001) {
-      this.shakeOffset.set(
-        (Math.random() - 0.5) * 2 * this.shakeIntensity + this.shakeVel.x * 0.3,
-        (Math.random() - 0.5) * this.shakeIntensity,
-        (Math.random() - 0.5) * 2 * this.shakeIntensity + this.shakeVel.z * 0.3
-      );
-      this.shakeIntensity *= Math.pow(0.015, dt);
-      this.shakeVel.multiplyScalar(0.85);
+    this.shakeTime += dt;
+    if (this.trauma > 0.001 || this.shakeVel.lengthSq() > 0.0001) {
+      const t = this.shakeTime * 38;
+      const amp = this.trauma * this.trauma * 0.9;
+      // Smooth pseudo-noise from layered sines (no per-frame jitter popping)
+      const nx = Math.sin(t * 1.0) * 0.6 + Math.sin(t * 2.37 + 1.3) * 0.4;
+      const ny = Math.sin(t * 1.31 + 4.1) * 0.6 + Math.sin(t * 2.91 + 0.7) * 0.4;
+      const nz = Math.sin(t * 0.87 + 2.2) * 0.6 + Math.sin(t * 2.13 + 3.9) * 0.4;
+      this.shakeOffset.set(nx * amp + this.shakeVel.x * 0.35, ny * amp * 0.6, nz * amp + this.shakeVel.z * 0.35);
+      this.trauma = Math.max(0, this.trauma - dt * 1.9);
+      this.shakeVel.multiplyScalar(Math.pow(0.0008, dt));
     } else {
       this.shakeOffset.set(0, 0, 0);
-      this.shakeIntensity = 0;
+      this.trauma = 0;
     }
+    this.fovKick *= Math.pow(0.002, dt);
+    if (Math.abs(this.fovKick) < 0.01) this.fovKick = 0;
 
     // Particles
     for (let i = this.particles.length - 1; i >= 0; i--) {

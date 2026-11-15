@@ -1,0 +1,402 @@
+/* ───────────── Audio mixer widget (top corner) ───────────── */
+#audio-controls {
+  position: fixed;
+  top: 214px;
+  right: 22px;
+  z-index: 30; /* below modals (40) so journals/shops cover it */
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  pointer-events: auto;
+}
+#audio-controls .ac-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 18px;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  transition: transform 0.12s ease, border-color 0.12s ease;
+}
+#audio-controls .ac-btn:hover {
+  transform: translateY(-1px);
+  border-color: var(--gold-bright);
+}
+#audio-controls .ac-btn.muted {
+  border-color: rgba(225, 66, 66, 0.6);
+}
+#audio-controls .ac-panel {
+  display: none;
+  width: 230px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(12, 10, 18, 0.94);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
+}
+#audio-controls .ac-panel.open {
+  display: block;
+}
+#audio-controls .ac-title {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin-bottom: 8px;
+  font-weight: 800;
+}
+#audio-controls .ac-row {
+  display: grid;
+  grid-template-columns: 58px 1fr 30px;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text);
+  margin: 6px 0;
+}
+#audio-controls .ac-row input {
+  width: 100%;
+  accent-color: #eab354;
+  cursor: pointer;
+}
+#audio-controls .ac-val {
+  text-align: right;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+#audio-controls .ac-mute {
+  width: 100%;
+  margin-top: 6px;
+  padding: 7px;
+  border-radius: 8px;
+  border: 1px solid rgba(225, 66, 66, 0.45);
+  background: rgba(40, 10, 14, 0.6);
+  color: #fca5a5;
+  font-size: 12px;
+  cursor: pointer;
+}
+@media (max-width: 720px) {
+  #audio-controls {
+    right: 12px;
+    top: auto;
+    bottom: 160px;
+  }
+}
+
+/* ───────────── Objective tracker ───────────── */
+.objective-card {
+  max-width: 340px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(40, 18, 60, 0.82), rgba(14, 12, 20, 0.86));
+  border: 1px solid rgba(168, 85, 247, 0.4);
+  backdrop-filter: blur(8px);
+  cursor: pointer;
+  box-shadow: 0 0 18px rgba(168, 85, 247, 0.12);
+}
+.objective-card:hover {
+  border-color: rgba(216, 180, 254, 0.8);
+}
+.obj-act {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #c4b5fd;
+  font-weight: 800;
+}
+.obj-text {
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 700;
+  margin-top: 2px;
+  line-height: 1.3;
+}
+.obj-brand {
+  font-size: 11px;
+  color: #d8b4fe;
+  margin-top: 4px;
+  letter-spacing: 0.06em;
+  text-shadow: 0 0 8px rgba(168, 85, 247, 0.7);
+}
+.obj-brand:empty {
+  display: none;
+}
+
+/* ───────────── NPC dialogue + shops ───────────── */
+.npc-dialogue {
+  width: min(680px, 92vw);
+  padding: 16px 18px;
+  border-radius: 14px;
+  border: 1px solid;
+  background: linear-gradient(180deg, rgba(20, 16, 30, 0.96), rgba(10, 8, 16, 0.96));
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+.npc-speaker {
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.npc-line {
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--text);
+  margin: 8px 0 12px;
+}
+.npc-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.npc-opt {
+  text-align: left;
+  padding: 9px 12px;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, transform 0.12s ease;
+}
+.npc-opt:hover:not([disabled]) {
+  background: rgba(234, 179, 84, 0.12);
+  border-color: var(--gold);
+  transform: translateX(3px);
+}
+.npc-opt[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.npc-opt.confront {
+  border-color: rgba(250, 204, 21, 0.6);
+  color: #fde047;
+  background: rgba(250, 204, 21, 0.08);
+  font-weight: 700;
+}
+.npc-opt.descend {
+  border-color: rgba(124, 58, 237, 0.5);
+  color: #ddd6fe;
+}
+.shop-panel {
+  background: rgba(16, 14, 24, 0.92);
+  border: 1px solid;
+  border-radius: 12px;
+  padding: 14px;
+}
+.shop-desc {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 8px 0;
+  line-height: 1.4;
+}
+.shop-btn {
+  width: 100%;
+  padding: 9px 12px !important;
+  font-size: 12px !important;
+}
+.tier-badge {
+  font-size: 12px;
+  padding: 7px 14px;
+  border-radius: 999px;
+  color: #fde047;
+  border: 1px solid rgba(250, 204, 21, 0.45);
+  background: rgba(250, 204, 21, 0.08);
+}
+.tier-badge.locked {
+  color: var(--muted);
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.03);
+  font-style: italic;
+}
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 10px;
+  width: min(760px, 92vw);
+  max-height: 42vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.kafra-card {
+  cursor: default;
+}
+.modal-backdrop {
+  overflow-y: auto;
+  padding: 24px 12px;
+}
+
+/* ───────────── Journal — Ledger & Echoes ───────────── */
+.modal-backdrop.journal {
+  justify-content: flex-start;
+  gap: 14px;
+}
+.journal-tabs {
+  display: flex;
+  gap: 8px;
+}
+.journal-tabs .class-tab {
+  padding: 8px 16px;
+  font-size: 13px;
+}
+.journal-body {
+  width: min(1040px, 94vw);
+  max-height: 70vh;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+.journal-objective {
+  padding: 14px 16px;
+  border-radius: 12px;
+  margin-bottom: 14px;
+  background: linear-gradient(90deg, rgba(88, 28, 135, 0.45), rgba(14, 12, 20, 0.9));
+  border: 1px solid rgba(168, 85, 247, 0.5);
+}
+.journal-obj-title {
+  font-size: 18px;
+  font-weight: 800;
+  color: #fde68a;
+  margin-top: 4px;
+}
+.journal-obj-detail {
+  font-size: 13px;
+  color: var(--text);
+  opacity: 0.85;
+  margin-top: 4px;
+}
+.journal-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+@media (max-width: 820px) {
+  .journal-cols {
+    grid-template-columns: 1fr;
+  }
+}
+.journal-h {
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin: 4px 0 8px;
+}
+.conspiracy {
+  padding: 11px 12px;
+  border-radius: 10px;
+  margin-bottom: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(16, 14, 24, 0.9);
+}
+.conspiracy.suspected {
+  border-color: rgba(250, 204, 21, 0.35);
+}
+.conspiracy.exposed {
+  border-color: rgba(239, 68, 68, 0.55);
+  box-shadow: inset 0 0 18px rgba(239, 68, 68, 0.08);
+}
+.conspiracy.atoned {
+  border-color: rgba(52, 211, 153, 0.45);
+}
+.consp-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 800;
+  font-size: 14px;
+  color: var(--text);
+}
+.consp-status {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 999px;
+}
+.consp-status.hidden {
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.05);
+}
+.consp-status.suspected {
+  color: #fde047;
+  background: rgba(250, 204, 21, 0.12);
+}
+.consp-status.exposed {
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.15);
+}
+.consp-status.atoned {
+  color: #6ee7b7;
+  background: rgba(52, 211, 153, 0.12);
+}
+.consp-suspect {
+  font-size: 12px;
+  color: #c4b5fd;
+  margin-top: 3px;
+}
+.consp-text {
+  font-size: 12.5px;
+  color: var(--text);
+  opacity: 0.85;
+  margin-top: 5px;
+  line-height: 1.45;
+}
+.consp-clues {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 7px;
+}
+.consp-clues span {
+  font-size: 11px;
+  color: #a5b4fc;
+  background: rgba(129, 140, 248, 0.1);
+  padding: 2px 7px;
+  border-radius: 6px;
+}
+.echo-floor {
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin: 10px 0 5px;
+}
+.echo-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 11px;
+  border-radius: 9px;
+  margin-bottom: 6px;
+  background: rgba(16, 14, 24, 0.85);
+  border: 1px dashed rgba(255, 255, 255, 0.1);
+}
+.echo-row.found {
+  border-style: solid;
+  border-color: rgba(165, 180, 252, 0.3);
+}
+.echo-title {
+  font-size: 13px;
+  font-weight: 700;
+}
+.echo-clue {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.replay-btn {
+  padding: 5px 10px !important;
+  font-size: 11px !important;
+  white-space: nowrap;
+}
+.scene-list {
+  display: flex;
+  flex-direction: column;
+}

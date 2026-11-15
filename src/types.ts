@@ -84,6 +84,8 @@ export interface SkillNodeDef {
 }
 
 import type { BaseStats, DerivedROStats } from './game/RagnarokStatsSystem';
+import type { JournalView } from './systems/QuestAndNarrativeSystem';
+import type { NpcModalView } from './systems/TownHubSystem';
 import type { ROSkillId } from './game/SkillSystem';
 
 export type TownNpcId = 'blacksmith' | 'kafra' | 'hypnotist' | 'alchemist' | 'guildmaster';
@@ -107,6 +109,7 @@ export type GamePhase =
   | 'skill_tree'
   | 'stats_window'
   | 'npc_modal'
+  | 'journal'
   | 'dead';
 
 export interface HUDState {
@@ -160,4 +163,22 @@ export interface HUDState {
   endureTimer: number;
   magnumEndowTimer: number;
   quickenTimer: number;
+  // Story / town
+  objective: string;
+  objectiveAct: string;
+  journal: JournalView | null;
+  npcView: NpcModalView | null;
+  refineCap: number;
+  socketCard: KafraItem | null;
+  hasAtonementBlade: boolean;
+  jobTitle: string | null;
+  unlocks: {
+    masterwork: boolean;
+    miraLab: boolean;
+    jobAdvance: boolean;
+    soulGoldLedger: boolean;
+    endless: boolean;
+  };
+  endowLabel: string | null;
+  brandLevel: number;
 }

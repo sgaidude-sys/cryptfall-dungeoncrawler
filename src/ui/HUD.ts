@@ -3,6 +3,19 @@ import { RELICS } from '../game/relics';
 import type { StatKey } from '../game/RagnarokStatsSystem';
 import { CLASS_SKILL_TREES, RO_SKILLS, ROSkillId } from '../game/SkillSystem';
 import { HeroClassId, HUDState, KafraItem, RelicDef, RoomData, SkillNodeId } from '../types';
+import type { DialogueOption } from '../systems/TownHubSystem';
+
+export type MiraPurchase = 'conv_fire' | 'conv_wind' | 'conv_water' | 'awaken' | 'extract';
+
+const esc = (t: string) => t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+
+export function floorName(floor: number): string {
+  if (floor <= 0) return 'Oakhaven Town';
+  if (floor === 1) return 'Floor 1: Sunken Archives';
+  if (floor === 2) return 'Floor 2: Overgrown Ruins';
+  if (floor === 3) return 'Floor 3: Obsidian Spire Core';
+  return `Floor ${floor}: Endless Abyss`;
+}
 
 export interface ROCallbacks {
   onToggleStats: () => void;
@@ -19,6 +32,12 @@ export interface ROCallbacks {
   onUseBluePotion: () => void;
   onEnterDungeon: () => void;
   onReturnToTown: () => void;
+  onDialogueChoice: (opt: DialogueOption) => void;
+  onSocketCard: (card: KafraItem | null) => void;
+  onMiraBuy: (kind: MiraPurchase) => void;
+  onToggleJournal: () => void;
+  onReplayScene: (sceneId: string) => void;
+  onNewStory: () => void;
 }
 
 export class HUDManager {
@@ -30,6 +49,7 @@ export class HUDManager {
   private showingCodex = false;
   private isMuted = false;
   private ro?: ROCallbacks;
+  private journalTab: 'ledger' | 'scenes' = 'ledger';
 
   public setROCallbacks(ro: ROCallbacks): void {
     this.ro = ro;
@@ -151,6 +171,16 @@ export class HUDManager {
       return;
     }
 
+    if (state.phase === 'journal') {
+      const key = JSON.stringify([this.journalTab, state.journal?.echoCount, state.journal?.objective, state.journal?.scenes.filter((x) => x.seen).length]);
+      if (this.lastPhase !== 'journal' || this.lastModalKey !== key) {
+        this.lastPhase = 'journal';
+        this.lastModalKey = key;
+        this.renderJournal(state);
+      }
+      return;
+    }
+
     if (state.phase === 'npc_modal') {
       const key = JSON.stringify([
         state.activeNpc,
@@ -160,6 +190,16 @@ export class HUDManager {
         state.redPotions,
         state.bluePotions,
         state.equippedCard?.id ?? null,
+        state.socketCard?.id ?? null,
+        state.kafraStorage.length,
+        state.npcView?.nodeId ?? '',
+        state.npcView?.node.options.length ?? 0,
+        state.refineCap,
+        state.unlocks,
+        state.endowLabel,
+        state.hasAtonementBlade,
+        state.jobTitle,
+        state.statPoints,
       ]);
       if (this.lastPhase !== 'npc_modal' || this.lastModalKey !== key) {
         this.lastPhase = 'npc_modal';
@@ -293,7 +333,7 @@ export class HUDManager {
                 .slice(0, 4)
                 .map((skillId, idx) => {
                   const s = RO_SKILLS[skillId];
-                  const key = idx === 0 ? 'Q / 1' : idx === 1 ? 'C / 2' : idx === 2 ? 'R / 3' : 'V / 4';
+                  const key = idx === 0 ? '1 / RMB' : idx === 1 ? '2 / C' : idx === 2 ? '3 / R' : '4 / V';
                   return `<div class="ability-item"><strong>[${key}] ${s.name}:</strong> ${s.desc(3)}</div>`;
                 })
                 .join('')}
@@ -307,7 +347,9 @@ export class HUDManager {
         <div class="controls-hint">
           <span><span class="kbd">WASD</span> Move</span>
           <span><span class="kbd">LMB</span> Attack</span>
-          <span><span class="kbd">Q/C/R/V</span> Skills</span>
+          <span><span class="kbd">1-4 / RMB</span> Skills</span>
+          <span><span class="kbd">Q</span> Journal</span>
+          <span><span class="kbd">M</span> Mute</span>
           <span><span class="kbd">5/6</span> Potions</span>
           <span><span class="kbd">U</span> Stats</span>
           <span><span class="kbd">K</span> Skill Tree</span>
@@ -337,26 +379,27 @@ export class HUDManager {
   private renderPlayingShell(state: HUDState): void {
     const cls = HERO_CLASSES[state.selectedClass];
     const tree = CLASS_SKILL_TREES[state.selectedClass];
-    const floorTitle =
-      state.floor === 0
-        ? 'Oakhaven Town'
-        : state.floor === 1
-          ? 'Floor 1: Sunken Crypt'
-          : state.floor === 2
-            ? 'Floor 2: Overgrown Ruins'
-            : `Floor ${state.floor}: Obsidian Spire`;
+    const floorTitle = floorName(state.floor);
     this.root.innerHTML = `
       <div class="hud">
         <div class="hud-top">
           <div style="display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap">
-            <div class="hud-floor-card">
-              <div class="floor-title" id="hud-floor">${floorTitle}</div>
-              <div class="floor-sub" id="hud-stats">Lv.${state.level} &bull; Kills: 0 &bull; Gold: 0</div>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <div class="hud-floor-card">
+                <div class="floor-title" id="hud-floor">${floorTitle}</div>
+                <div class="floor-sub" id="hud-stats">Lv.${state.level} &bull; Kills: 0 &bull; Zeny: 0</div>
+              </div>
+              <div class="objective-card interactive" id="hud-objective" title="Open Journal [Q]">
+                <div class="obj-act" id="hud-obj-act">${esc(state.objectiveAct)}</div>
+                <div class="obj-text" id="hud-obj-text">${esc(state.objective)}</div>
+                <div class="obj-brand" id="hud-brand"></div>
+              </div>
             </div>
             <button id="btn-pause" class="class-tab interactive" style="padding:9px 12px;font-size:12px">ESC Menu</button>
             <button id="btn-ro-stats" class="class-tab interactive" style="padding:9px 12px;font-size:12px;border-color:rgba(56,189,248,0.45);color:#7dd3fc">[U] Stats (<span id="hud-stat-pts">${state.statPoints}</span>)</button>
             <button id="btn-skills" class="class-tab interactive" style="padding:9px 12px;font-size:12px;border-color:rgba(250,204,21,0.45);color:#fde047">[K] Skills (<span id="hud-sp">${state.roSkillPoints}</span>)</button>
-            <button id="btn-town" class="class-tab interactive" style="padding:9px 12px;font-size:12px;border-color:rgba(52,211,153,0.45);color:#6ee7b7">${state.floor === 0 ? 'Enter Crypt' : 'Town'}</button>
+            <button id="btn-journal" class="class-tab interactive" style="padding:9px 12px;font-size:12px;border-color:rgba(168,85,247,0.55);color:#d8b4fe">[Q] Journal</button>
+            <button id="btn-town" class="class-tab interactive" style="padding:9px 12px;font-size:12px;border-color:rgba(52,211,153,0.45);color:#6ee7b7">${state.floor === 0 ? 'Descend' : 'Town'}</button>
           </div>
 
           <div class="boss-bar-wrap" id="boss-wrap" style="display:none">
@@ -392,22 +435,22 @@ export class HUDManager {
             </div>
             <div class="skill-row">
               <div class="skill-slot">
-                <div class="s-key">Q / 1</div>
+                <div class="s-key">1 / RMB</div>
                 <div class="s-name" id="name-skill1">${RO_SKILLS[tree[0]]?.name ?? cls.skillName}</div>
                 <div class="cd-overlay" id="cd-skill" style="display:none"></div>
               </div>
               <div class="skill-slot" id="slot-skill2">
-                <div class="s-key">C / 2</div>
+                <div class="s-key">2 / C</div>
                 <div class="s-name" id="name-skill2">${RO_SKILLS[tree[1]]?.name ?? cls.skill2Name}</div>
                 <div class="cd-overlay" id="cd-skill2" style="display:none"></div>
               </div>
               <div class="skill-slot">
-                <div class="s-key">R / 3</div>
+                <div class="s-key">3 / R</div>
                 <div class="s-name" id="name-skill3">${RO_SKILLS[tree[2]]?.name ?? cls.ultName}</div>
                 <div class="cd-overlay" id="cd-ult" style="display:none"></div>
               </div>
               <div class="skill-slot">
-                <div class="s-key">V / 4</div>
+                <div class="s-key">4 / V</div>
                 <div class="s-name" id="name-skill4">${RO_SKILLS[tree[3]]?.name ?? 'Buff'}</div>
                 <div class="cd-overlay" id="cd-skill4" style="display:none"></div>
               </div>
@@ -429,6 +472,8 @@ export class HUDManager {
     document.getElementById('btn-pause')?.addEventListener('click', () => this.onTogglePause?.());
     document.getElementById('btn-ro-stats')?.addEventListener('click', () => this.ro?.onToggleStats());
     document.getElementById('btn-skills')?.addEventListener('click', () => this.onToggleSkillTree?.());
+    document.getElementById('btn-journal')?.addEventListener('click', () => this.ro?.onToggleJournal());
+    document.getElementById('hud-objective')?.addEventListener('click', () => this.ro?.onToggleJournal());
     document.getElementById('btn-town')?.addEventListener('click', () => {
       if (state.floor === 0) this.ro?.onEnterDungeon();
       else this.ro?.onReturnToTown();
@@ -439,19 +484,20 @@ export class HUDManager {
 
   private updatePlayingValues(state: HUDState): void {
     const floorEl = document.getElementById('hud-floor');
-    if (floorEl) {
-      floorEl.textContent =
-        state.floor === 0
-          ? 'Oakhaven Town Hub'
-          : state.floor === 1
-            ? 'Floor 1: Sunken Crypt'
-            : state.floor === 2
-              ? 'Floor 2: Overgrown Ruins'
-              : `Floor ${state.floor}: Obsidian Spire`;
-    }
+    if (floorEl) floorEl.textContent = floorName(state.floor) + (state.jobTitle ? `  ·  ${state.jobTitle}` : '');
 
     const statsEl = document.getElementById('hud-stats');
-    if (statsEl) statsEl.textContent = `Lv.${state.level} (${state.xp}/${state.xpToNext} XP)  •  Kills: ${state.kills}  •  Gold: ${state.gold}g`;
+    if (statsEl) statsEl.textContent = `Lv.${state.level} (${state.xp}/${state.xpToNext} XP)  •  Kills: ${state.kills}  •  Zeny: ${state.gold}z`;
+
+    const objAct = document.getElementById('hud-obj-act');
+    const objText = document.getElementById('hud-obj-text');
+    if (objAct && objAct.textContent !== state.objectiveAct) objAct.textContent = state.objectiveAct;
+    if (objText && objText.textContent !== state.objective) objText.textContent = state.objective;
+    const brandEl = document.getElementById('hud-brand');
+    if (brandEl) {
+      const txt = state.brandLevel > 0 ? `Soul-Debt Brand ${'◆'.repeat(state.brandLevel)}${'◇'.repeat(4 - state.brandLevel)}` : state.endowLabel ?? '';
+      if (brandEl.textContent !== txt) brandEl.textContent = txt;
+    }
 
     const statPtsEl = document.getElementById('hud-stat-pts');
     if (statPtsEl) statPtsEl.textContent = String(state.statPoints);
@@ -654,7 +700,8 @@ export class HUDManager {
         </div>
         <div style="display:flex;flex-direction:column;gap:12px;width:260px">
           <button class="start-btn" id="btn-resume">Resume</button>
-          <button class="class-tab" id="btn-restart-run" style="padding:12px;font-size:14px">Restart Run</button>
+          <button class="class-tab" id="btn-restart-run" style="padding:12px;font-size:14px">Restart Run (keep story)</button>
+          <button class="class-tab" id="btn-new-story" style="padding:12px;font-size:14px;border-color:rgba(168,85,247,0.55);color:#d8b4fe">New Game — Reset the Ledger</button>
           <button class="class-tab" id="btn-quit-title" style="padding:12px;font-size:14px;border-color:rgba(225,66,66,0.5);color:#ff8a8a">Quit to Title</button>
         </div>
       </div>
@@ -663,6 +710,10 @@ export class HUDManager {
     document.getElementById('btn-restart-run')?.addEventListener('click', () => {
       this.onUISelect?.();
       this.onRestartRun?.();
+    });
+    document.getElementById('btn-new-story')?.addEventListener('click', () => {
+      this.onUISelect?.();
+      this.ro?.onNewStory();
     });
     document.getElementById('btn-quit-title')?.addEventListener('click', () => {
       this.onUISelect?.();
@@ -794,73 +845,126 @@ export class HUDManager {
 
   private renderNpcModal(state: HUDState): void {
     const npc = state.activeNpc;
-    let title = 'Oakhaven NPC';
+    const view = state.npcView;
+    let title = 'Oakhaven';
     let body = '';
+    const zeny = `<div style="font-size:13px;color:var(--muted)">Your Zeny: <strong style="color:#fde047">${state.gold}z</strong></div>`;
+    const panel = (border: string, inner: string, w = 240) =>
+      `<div class="shop-panel" style="border-color:${border};width:${w}px">${inner}</div>`;
+
     if (npc === 'blacksmith') {
-      title = '⚒ Runesmith Torgar — Relic Refining';
+      title = '⚒ Garrett — Master Blacksmith';
       const wCost = (state.weaponRefine + 1) * 60;
       const aCost = (state.armorRefine + 1) * 50;
+      const cap = state.refineCap;
+      const wLocked = state.weaponRefine >= cap && cap < 10;
+      const aLocked = state.armorRefine >= cap && cap < 10;
+      const rate = (lv: number) => (lv <= 4 ? 100 : [90, 80, 65, 50, 40, 30][Math.min(5, lv - 5)]);
       body = `
-        <div style="font-size:13px;color:var(--muted)">Your Gold: <strong style="color:#fde047">${state.gold}g</strong></div>
+        ${zeny}
         <div style="display:flex;gap:14px;flex-wrap:wrap;justify-content:center">
-          <div style="background:rgba(16,14,24,0.92);border:1px solid rgba(249,115,22,0.45);border-radius:12px;padding:16px;width:240px">
-            <strong style="color:#fdba74">Weapon Refine (+${state.weaponRefine}/+10)</strong>
-            <p style="font-size:12px;color:var(--muted);margin:8px 0">+5 ATK & +5 MATK per level. Glowing aura at +7 and +10!</p>
-            <button class="start-btn" id="btn-ref-w" ${state.weaponRefine >= 10 || state.gold < wCost ? 'disabled' : ''} style="width:100%;padding:9px;font-size:12px">
-              ${state.weaponRefine >= 10 ? 'MAX +10' : `Refine (${wCost}g)`}
-            </button>
-          </div>
-          <div style="background:rgba(16,14,24,0.92);border:1px solid rgba(56,189,248,0.45);border-radius:12px;padding:16px;width:240px">
-            <strong style="color:#7dd3fc">Armor Refine (+${state.armorRefine}/+10)</strong>
-            <p style="font-size:12px;color:var(--muted);margin:8px 0">+4 Hard DEF per level for near-zero VIT tanking!</p>
-            <button class="start-btn" id="btn-ref-a" ${state.armorRefine >= 10 || state.gold < aCost ? 'disabled' : ''} style="width:100%;padding:9px;font-size:12px">
-              ${state.armorRefine >= 10 ? 'MAX +10' : `Refine (${aCost}g)`}
-            </button>
-          </div>
+          ${panel(
+            'rgba(249,115,22,0.45)',
+            `<strong style="color:#fdba74">Weapon Refine (+${state.weaponRefine}/+${cap})</strong>
+            <p class="shop-desc">+5 ATK & +4 MATK per level. Aura at +7 (cyan/gold) and +10 (radiant flame). Success: ${state.weaponRefine >= 10 ? '—' : rate(state.weaponRefine + 1) + '%'}</p>
+            <button class="start-btn shop-btn" id="btn-ref-w" ${state.weaponRefine >= 10 || wLocked || state.gold < wCost ? 'disabled' : ''}>
+              ${state.weaponRefine >= 10 ? 'MAX +10' : wLocked ? '🔒 Masterwork heat required' : `Refine (${wCost}z)`}
+            </button>`
+          )}
+          ${panel(
+            'rgba(56,189,248,0.45)',
+            `<strong style="color:#7dd3fc">Armor Refine (+${state.armorRefine}/+${cap})</strong>
+            <p class="shop-desc">+4 Hard DEF per level for near-zero VIT tanking. Success: ${state.armorRefine >= 10 ? '—' : rate(state.armorRefine + 1) + '%'}</p>
+            <button class="start-btn shop-btn" id="btn-ref-a" ${state.armorRefine >= 10 || aLocked || state.gold < aCost ? 'disabled' : ''}>
+              ${state.armorRefine >= 10 ? 'MAX +10' : aLocked ? '🔒 Masterwork heat required' : `Refine (${aCost}z)`}
+            </button>`
+          )}
         </div>
+        ${state.unlocks.masterwork ? '<div class="tier-badge">★ Masterwork Tier unlocked — refine up to +10</div>' : '<div class="tier-badge locked">Masterwork Tier (+7 to +10) is sealed. Something weighs on Garrett’s conscience...</div>'}
       `;
     } else if (npc === 'kafra') {
-      title = '📦 Vault Keeper Pip — Monster Sigils';
+      title = '📦 Pip — Vault Keeper';
+      const cardBtn = (c: KafraItem) => {
+        const eq = state.equippedCard?.id === c.id;
+        const sock = state.socketCard?.id === c.id;
+        return `
+          <div class="relic-card kafra-card" style="text-align:left;padding:12px;border-color:${eq || sock ? '#34d399' : 'rgba(255,255,255,0.16)'}">
+            <span class="r-tag">${eq ? 'ARMOR SLOT' : sock ? 'WEAPON SOCKET' : c.icon}</span>
+            <span class="r-name" style="font-size:14px">${esc(c.name)}</span>
+            <span class="r-desc" style="font-size:12px">${esc(c.desc)}</span>
+            <div style="display:flex;gap:6px;margin-top:8px">
+              <button class="class-tab kafra-equip" data-id="${c.id}" style="padding:5px 10px;font-size:11px">${eq ? 'Unequip' : 'Equip'}</button>
+              ${state.hasAtonementBlade ? `<button class="class-tab kafra-socket" data-id="${c.id}" style="padding:5px 10px;font-size:11px">${sock ? 'Unsocket' : 'Socket [1]'}</button>` : ''}
+            </div>
+          </div>`;
+      };
       body = `
-        <div style="font-size:13px;color:var(--muted)">Equipped Sigil: <strong style="color:#7dd3fc">${state.equippedCard?.name ?? 'None'}</strong></div>
-        <div style="display:grid;grid-template-columns:repeat(2,minmax(200px,240px));gap:12px">
-          ${state.kafraStorage
-            .map((c) => {
-              const eq = state.equippedCard?.id === c.id;
-              return `
-              <button class="relic-card kafra-card-btn" data-id="${c.id}" style="text-align:left;padding:12px;border-color:${eq ? '#34d399' : 'rgba(255,255,255,0.16)'}">
-                <span class="r-tag">${eq ? 'EQUIPPED' : c.icon}</span>
-                <span class="r-name" style="font-size:14px">${c.name}</span>
-                <span class="r-desc" style="font-size:12px">${c.desc}</span>
-              </button>
-            `;
-            })
-            .join('')}
-        </div>
+        <div style="font-size:13px;color:var(--muted);text-align:center">Monster Cards are crystallized memories of fallen guardians.<br/>Armor Slot: <strong style="color:#7dd3fc">${esc(state.equippedCard?.name ?? 'Empty')}</strong>
+        ${state.hasAtonementBlade ? ` &bull; Atonement Blade [1]: <strong style="color:#fdba74">${esc(state.socketCard?.name ?? 'Empty')}</strong>` : ''}</div>
+        <div class="card-grid">${state.kafraStorage.map(cardBtn).join('')}</div>
+        ${state.unlocks.soulGoldLedger ? '<div class="tier-badge">★ Soul-Gold Ledger: +25% Zeny from monsters</div>' : ''}
       `;
     } else if (npc === 'hypnotist') {
-      title = '✦ Soul Weaver Vaelen — Build Reset';
+      title = '✦ Vaelen — Soul Weaver';
       body = `
-        <p style="font-size:13px;color:var(--muted);max-width:440px;text-align:center">Unbind your soul in Oakhaven Town to freely test DEX Instant-Cast, VIT Tanking, or AGI/LUK Crit builds!</p>
+        <p style="font-size:13px;color:var(--muted);max-width:460px;text-align:center">Unbind your soul to freely test DEX instant-cast, VIT tanking, or AGI/LUK crit builds.</p>
         <div style="display:flex;gap:12px">
           <button class="start-btn" id="btn-reset-stats" style="padding:10px 18px;font-size:13px">Reset Base Stats</button>
           <button class="start-btn" id="btn-reset-skills" style="padding:10px 18px;font-size:13px">Reset Skills</button>
         </div>
+        ${state.jobTitle ? `<div class="tier-badge">★ Job Advanced: ${esc(state.jobTitle)}</div>` : state.unlocks.jobAdvance ? '<div class="tier-badge">★ Job Advancement available — ask Vaelen about the Commander’s power</div>' : ''}
       `;
     } else if (npc === 'alchemist') {
-      title = '⚗ Apothecary Sera — Elixir Shop';
+      title = '⚗ Mira — Alchemist';
+      const lab = state.unlocks.miraLab;
       body = `
-        <div style="font-size:13px;color:var(--muted)">Your Gold: <strong style="color:#fde047">${state.gold}g</strong></div>
-        <div style="display:flex;gap:14px">
-          <button class="start-btn" id="btn-buy-red" ${state.gold < 25 ? 'disabled' : ''} style="padding:12px 18px;font-size:13px">Buy Crimson Elixir (25g) [Owned: ${state.redPotions}]</button>
-          <button class="start-btn" id="btn-buy-blue" ${state.gold < 40 ? 'disabled' : ''} style="padding:12px 18px;font-size:13px">Buy Azure Elixir (40g) [Owned: ${state.bluePotions}]</button>
+        ${zeny}
+        <div style="display:flex;gap:12px;flex-wrap:wrap;justify-content:center">
+          <button class="start-btn shop-btn" id="btn-buy-red" ${state.gold < 25 ? 'disabled' : ''}>Crimson Elixir (25z) · ${state.redPotions}</button>
+          <button class="start-btn shop-btn" id="btn-buy-blue" ${state.gold < 40 ? 'disabled' : ''}>Azure Elixir (40z) · ${state.bluePotions}</button>
         </div>
+        ${
+          lab
+            ? `<div class="tier-badge">★ Secret Lab unlocked ${state.endowLabel ? '· Active: ' + esc(state.endowLabel) : ''}</div>
+          <div style="display:flex;gap:12px;flex-wrap:wrap;justify-content:center">
+            ${panel('rgba(249,115,22,0.5)', `<strong style="color:#fdba74">Elemental Converters</strong><p class="shop-desc">Endow your weapon for 90s. Elemental weaknesses deal bonus damage.</p>
+              <div style="display:flex;gap:6px;flex-wrap:wrap">
+                <button class="class-tab" id="btn-conv-fire" ${state.gold < 60 ? 'disabled' : ''} style="padding:6px 10px;font-size:11px">🔥 Flame (60z)</button>
+                <button class="class-tab" id="btn-conv-wind" ${state.gold < 60 ? 'disabled' : ''} style="padding:6px 10px;font-size:11px">⚡ Wind (60z)</button>
+                <button class="class-tab" id="btn-conv-water" ${state.gold < 60 ? 'disabled' : ''} style="padding:6px 10px;font-size:11px">❄ Frost (60z)</button>
+              </div>`, 260)}
+            ${panel('rgba(250,204,21,0.5)', `<strong style="color:#fde047">Awakening Potion</strong><p class="shop-desc">+ASPD surge (Quicken) for 45 seconds.</p>
+              <button class="start-btn shop-btn" id="btn-awaken" ${state.gold < 70 ? 'disabled' : ''}>Drink (70z)</button>`, 220)}
+            ${panel('rgba(168,85,247,0.5)', `<strong style="color:#d8b4fe">Card Extraction</strong><p class="shop-desc">Distil a monster’s crystallized memory into a new Card.</p>
+              <button class="start-btn shop-btn" id="btn-extract" ${state.gold < 150 ? 'disabled' : ''}>Extract (150z)</button>`, 220)}
+          </div>`
+            : '<div class="tier-badge locked">The bottles in the back aren’t for sale... yet.</div>'
+        }
       `;
+    } else if (npc === 'guildmaster') {
+      title = '⛨ Warden Aldric — Spire Gate';
     }
+
+    const dialogue = view
+      ? `
+        <div class="npc-dialogue" style="border-color:${view.node.color}">
+          <div class="npc-speaker" style="color:${view.node.color}">${esc(view.node.speaker)}</div>
+          <div class="npc-line">${esc(view.node.text)}</div>
+          <div class="npc-options">
+            ${view.node.options
+              .map(
+                (o, i) =>
+                  `<button class="npc-opt ${o.action === 'confront' ? 'confront' : ''} ${o.action === 'descend' ? 'descend' : ''}" data-idx="${i}" ${o.disabled ? 'disabled' : ''}>${esc(o.label)}</button>`
+              )
+              .join('')}
+          </div>
+        </div>`
+      : '';
 
     this.root.innerHTML = `
       <div class="modal-backdrop interactive">
         <div class="modal-title">${title}</div>
+        ${dialogue}
         ${body}
         <button class="class-tab" id="btn-close-npc" style="padding:10px 24px;margin-top:8px">Close (ESC)</button>
       </div>
@@ -871,22 +975,128 @@ export class HUDManager {
     document.getElementById('btn-reset-skills')?.addEventListener('click', () => this.ro?.onResetSkills());
     document.getElementById('btn-buy-red')?.addEventListener('click', () => this.ro?.onBuyPotion('red'));
     document.getElementById('btn-buy-blue')?.addEventListener('click', () => this.ro?.onBuyPotion('blue'));
-    this.root.querySelectorAll('.kafra-card-btn').forEach((btn) => {
+    document.getElementById('btn-conv-fire')?.addEventListener('click', () => this.ro?.onMiraBuy('conv_fire'));
+    document.getElementById('btn-conv-wind')?.addEventListener('click', () => this.ro?.onMiraBuy('conv_wind'));
+    document.getElementById('btn-conv-water')?.addEventListener('click', () => this.ro?.onMiraBuy('conv_water'));
+    document.getElementById('btn-awaken')?.addEventListener('click', () => this.ro?.onMiraBuy('awaken'));
+    document.getElementById('btn-extract')?.addEventListener('click', () => this.ro?.onMiraBuy('extract'));
+    this.root.querySelectorAll('.kafra-equip').forEach((btn) => {
       btn.addEventListener('click', () => {
         const id = (btn as HTMLElement).dataset.id;
         const card = state.kafraStorage.find((c) => c.id === id) ?? null;
         this.ro?.onEquipCard(state.equippedCard?.id === id ? null : card);
       });
     });
+    this.root.querySelectorAll('.kafra-socket').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = (btn as HTMLElement).dataset.id;
+        const card = state.kafraStorage.find((c) => c.id === id) ?? null;
+        this.ro?.onSocketCard(state.socketCard?.id === id ? null : card);
+      });
+    });
+    this.root.querySelectorAll('.npc-opt').forEach((btn) => {
+      btn.addEventListener('mouseenter', () => this.onUIHover?.());
+      btn.addEventListener('click', () => {
+        const idx = Number((btn as HTMLElement).dataset.idx);
+        const opt = view?.node.options[idx];
+        if (opt && !opt.disabled) this.ro?.onDialogueChoice(opt);
+      });
+    });
     document.getElementById('btn-close-npc')?.addEventListener('click', () => this.ro?.onCloseModal());
+  }
+
+  private renderJournal(state: HUDState): void {
+    const j = state.journal;
+    if (!j) return;
+    const statusLabel: Record<string, string> = { hidden: 'Unknown', suspected: 'Suspected', exposed: 'Exposed', atoned: 'Resolved' };
+    const ledger = `
+      <div class="journal-objective">
+        <div class="obj-act">${esc(j.act)}</div>
+        <div class="journal-obj-title">▶ ${esc(j.objective)}</div>
+        <div class="journal-obj-detail">${esc(j.objectiveDetail)}</div>
+      </div>
+      <div class="journal-cols">
+        <div class="journal-col">
+          <div class="journal-h">Town Conspiracies</div>
+          ${j.conspiracies
+            .map(
+              (c) => `
+            <div class="conspiracy ${c.status}">
+              <div class="consp-head"><span>${esc(c.def.title)}</span><span class="consp-status ${c.status}">${statusLabel[c.status]}</span></div>
+              <div class="consp-suspect">${c.status === 'hidden' ? '??? — Suspect unknown' : esc(c.def.suspectName)}</div>
+              <div class="consp-text">${esc(c.text)}</div>
+              ${c.clues.length ? `<div class="consp-clues">${c.clues.map((e) => `<span>◈ ${esc(e.title)}</span>`).join('')}</div>` : ''}
+            </div>`
+            )
+            .join('')}
+        </div>
+        <div class="journal-col">
+          <div class="journal-h">Echo Shards <span style="color:var(--muted);font-weight:500">(${j.echoCount}/${j.echoTotal})</span></div>
+          ${[1, 2, 3]
+            .map(
+              (f) => `
+            <div class="echo-floor">${esc(floorName(f))}</div>
+            ${j.echoes
+              .filter((e) => e.def.floor === f)
+              .map((e) =>
+                e.found
+                  ? `<div class="echo-row found">
+                      <div><div class="echo-title" style="color:#${e.def.color.toString(16).padStart(6, '0')}">◈ ${esc(e.def.title)}</div><div class="echo-clue">${esc(e.def.clue)}</div></div>
+                      <button class="class-tab replay-btn" data-scene="echo_${e.def.id}">▶ Replay</button>
+                    </div>`
+                  : `<div class="echo-row"><div><div class="echo-title" style="color:var(--muted)">◇ ??? — Undiscovered memory</div></div></div>`
+              )
+              .join('')}`
+            )
+            .join('')}
+        </div>
+      </div>`;
+    const scenes = `
+      <div class="journal-h">Chronicle — The Ashen Ledger</div>
+      <div class="scene-list">
+        ${j.scenes
+          .map(
+            (sc) => `
+          <div class="echo-row ${sc.seen ? 'found' : ''}">
+            <div><div class="echo-title">${sc.seen ? esc(sc.title) : '??? — Not yet witnessed'}</div>${sc.seen ? `<div class="echo-clue">${esc(sc.logline)}</div>` : ''}</div>
+            ${sc.seen ? `<button class="class-tab replay-btn" data-scene="${sc.id}">▶ Replay</button>` : ''}
+          </div>`
+          )
+          .join('')}
+      </div>`;
+    this.root.innerHTML = `
+      <div class="modal-backdrop interactive journal">
+        <div class="modal-title">📖 Journal</div>
+        <div class="journal-tabs">
+          <button class="class-tab ${this.journalTab === 'ledger' ? 'active' : ''}" id="jt-ledger">Ledger &amp; Echoes</button>
+          <button class="class-tab ${this.journalTab === 'scenes' ? 'active' : ''}" id="jt-scenes">Chronicle</button>
+        </div>
+        <div class="journal-body">${this.journalTab === 'ledger' ? ledger : scenes}</div>
+        <button class="class-tab" id="btn-close-journal" style="padding:10px 24px;margin-top:4px">Close (Q / ESC)</button>
+      </div>`;
+    document.getElementById('jt-ledger')?.addEventListener('click', () => {
+      this.journalTab = 'ledger';
+      this.onUISelect?.();
+      this.lastModalKey = '';
+    });
+    document.getElementById('jt-scenes')?.addEventListener('click', () => {
+      this.journalTab = 'scenes';
+      this.onUISelect?.();
+      this.lastModalKey = '';
+    });
+    this.root.querySelectorAll('.replay-btn').forEach((btn) =>
+      btn.addEventListener('click', () => this.ro?.onReplayScene((btn as HTMLElement).dataset.scene!))
+    );
+    document.getElementById('btn-close-journal')?.addEventListener('click', () => this.ro?.onToggleJournal());
   }
 
   private renderDeath(state: HUDState): void {
     this.root.innerHTML = `
       <div class="modal-backdrop interactive">
-        <div class="modal-title" style="color:#ff5252">You Fell in the Crypt</div>
+        <div class="modal-title" style="color:#ff5252">The Ledger Claims You</div>
+        <div style="font-size:14px;color:var(--muted);max-width:460px;text-align:center">Your brand flares as the darkness closes in... but the final page is not yet written. Rise, and return to Oakhaven.</div>
         <div style="font-size:16px;color:var(--text)">
-          Reached <strong>Floor ${state.floor}</strong> &bull; Slain <strong>${state.kills}</strong> Skeletons &bull; Collected <strong>${state.relics.length}</strong> Relics
+          Reached <strong>${esc(floorName(state.floor))}</strong> &bull; Slain <strong>${state.kills}</strong> foes &bull; Collected <strong>${state.relics.length}</strong> Relics
         </div>
         <button class="start-btn" id="btn-retry">Rise Again</button>
       </div>

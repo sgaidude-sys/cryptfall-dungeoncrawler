@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { MaterialFX } from '../graphics/MaterialFX';
 import { AssetManager } from '../assets/AssetManager';
 import { AnimatorHelper } from '../engine/AnimatorHelper';
 import { VFXManager } from '../engine/VFXManager';
@@ -46,6 +47,18 @@ export class PlayerController {
     { id: 'lich_sigil', name: 'Ossuary Lich Sigil', desc: '+8 INT (MATK & Max SP)', icon: '🔮', bonusStat: 'int', bonusAmt: 8 },
   ];
   public equippedCard: KafraItem | null = null;
+  /** Card socketed into Garrett's Atonement Blade [1] (second card slot). */
+  public socketCard: KafraItem | null = null;
+  public hasAtonementBlade = false;
+  /** Pip's soul-gold ledger bonus to monster Zeny drops. */
+  public goldMult = 1;
+  /** Job Advancement title reclaimed from the Spire Warden's sealed power. */
+  public jobTitle: string | null = null;
+  /** Mira's Elemental Converter weapon endow. */
+  public endowElement: ElementType | null = null;
+  public endowTimer = 0;
+  private auraSparkTimer = 0;
+  private auraLight: THREE.PointLight | null = null;
   public relics: RelicId[] = [];
   public kills = 0;
   public gold = 0;
@@ -117,6 +130,52 @@ export class PlayerController {
 
     this.anim = new AnimatorHelper(this.mesh, this.assets);
     this.anim.playLoop('Idle_A', 0.1);
+
+    // Hero shading: cool fresnel rim so the silhouette pops against every biome
+    MaterialFX.apply(this.mesh, 0xa5b4fc, 0.42, 2.8);
+    this.updateWeaponRefineVisuals();
+  }
+
+  /** Weapon roots attached to the hand slots (for shimmer auras & spark emitters). */
+  private getWeaponRoots(): THREE.Object3D[] {
+    const roots: THREE.Object3D[] = [];
+    for (const name of ['handslotr', 'handslot.r', 'handr', 'handslotl', 'handslot.l', 'handl']) {
+      const bone = this.mesh.getObjectByName(name);
+      if (bone) {
+        for (const c of bone.children) {
+          if (!roots.includes(c) && !(c instanceof THREE.Light) && !(c instanceof THREE.Bone)) roots.push(c);
+        }
+      }
+    }
+    return roots;
+  }
+
+  public grantAtonementBlade(): void {
+    if (this.hasAtonementBlade) return;
+    this.hasAtonementBlade = true;
+    this.roStats.baseWeaponAtk += 12;
+    this.roStats.baseWeaponMatk += 10;
+    this.getDerived();
+  }
+
+  public equipSocketCard(card: KafraItem | null): void {
+    if (!this.hasAtonementBlade) return;
+    if (this.socketCard?.bonusStat && this.socketCard.bonusAmt) {
+      this.roStats.bonus[this.socketCard.bonusStat] = Math.max(
+        0,
+        this.roStats.bonus[this.socketCard.bonusStat] - this.socketCard.bonusAmt
+      );
+    }
+    this.socketCard = card;
+    if (card?.bonusStat && card.bonusAmt) {
+      this.roStats.bonus[card.bonusStat] += card.bonusAmt;
+    }
+    this.getDerived();
+  }
+
+  public setEndow(element: ElementType, seconds: number): void {
+    this.endowElement = element;
+    this.endowTimer = seconds;
   }
 
   public addRelic(id: RelicId): void {
@@ -150,6 +209,7 @@ export class PlayerController {
   }
 
   public equipKafraCard(card: KafraItem | null): void {
+    if (card && this.socketCard?.id === card.id) this.equipSocketCard(null);
     if (this.equippedCard?.bonusStat && this.equippedCard.bonusAmt) {
       this.roStats.bonus[this.equippedCard.bonusStat] = Math.max(
         0,
@@ -169,7 +229,9 @@ export class PlayerController {
     const d = this.getDerived();
     const amt = Math.round(90 * d.potionMult);
     this.heal(amt);
-    this.sound.playUIPopup();
+    this.sound.playPotionGulp();
+    this.sound.playHeal();
+    this.vfx.spawnBurst(this.pos.clone().add(new THREE.Vector3(0, 1.0, 0)), 0xf87171, 10, 3.2);
     return true;
   }
 
@@ -181,32 +243,62 @@ export class PlayerController {
     if (gain > 0) {
       this.vfx.spawnROText(this.pos.clone().add(new THREE.Vector3(0, 1.8, 0)), `+${gain}`, 'sp');
     }
-    this.sound.playUIPopup();
+    this.sound.playPotionGulp();
+    this.vfx.spawnBurst(this.pos.clone().add(new THREE.Vector3(0, 1.0, 0)), 0x60a5fa, 10, 3.2);
     return true;
   }
 
   public updateWeaponRefineVisuals(): void {
     const ref = this.roStats.weaponRefine;
-    let glowColor = 0x000000;
-    let intensity = 0;
+    // +4..+6 ember glow, +7..+9 cyan/gold shimmer, +10 intense radiant flame aura
+    let color = 0x000000;
+    let strength = 0;
     if (ref >= 10) {
-      glowColor = 0x38bdf8;
-      intensity = 1.15;
+      color = 0xff8a2a;
+      strength = 1.6;
     } else if (ref >= 7) {
-      glowColor = 0xfacc15;
-      intensity = 0.65;
+      color = ref >= 9 ? 0x7dfcf0 : 0xffd166;
+      strength = 0.7 + (ref - 7) * 0.2;
     } else if (ref >= 4) {
-      glowColor = 0xf97316;
-      intensity = 0.25;
+      color = 0xf97316;
+      strength = 0.15 + (ref - 4) * 0.06;
     }
-    this.mesh.traverse((obj) => {
-      if (obj instanceof THREE.Mesh && obj.material instanceof THREE.MeshStandardMaterial) {
-        if (obj.name.toLowerCase().includes('weapon') || obj.parent?.name?.includes('Hand')) {
-          obj.material.emissive.setHex(glowColor);
-          obj.material.emissiveIntensity = intensity;
-        }
+    for (const w of this.getWeaponRoots()) {
+      MaterialFX.applyWeaponShimmer(w, color, strength);
+    }
+    if (ref >= 7) {
+      if (!this.auraLight) {
+        this.auraLight = new THREE.PointLight(color, 0, 4.5, 2);
+        this.auraLight.position.set(0, 1.2, 0.4);
+        this.mesh.add(this.auraLight);
       }
-    });
+      this.auraLight.color.setHex(ref >= 10 ? 0xff7a1a : color);
+      this.auraLight.intensity = ref >= 10 ? 5 : 2.2;
+    } else if (this.auraLight) {
+      this.auraLight.intensity = 0;
+    }
+  }
+
+  private updateRefineAura(dt: number): void {
+    const ref = this.roStats.weaponRefine;
+    if (ref < 7) return;
+    this.auraSparkTimer -= dt;
+    if (this.auraLight) {
+      const base = ref >= 10 ? 5 : 2.2;
+      this.auraLight.intensity = base * (0.85 + Math.sin(performance.now() * 0.013) * 0.1 + Math.random() * 0.08);
+    }
+    if (this.auraSparkTimer <= 0) {
+      this.auraSparkTimer = ref >= 10 ? 0.06 : 0.18;
+      const roots = this.getWeaponRoots();
+      const w = roots[0];
+      if (w) {
+        const wp = new THREE.Vector3();
+        w.getWorldPosition(wp);
+        wp.add(new THREE.Vector3((Math.random() - 0.5) * 0.4, Math.random() * 0.6, (Math.random() - 0.5) * 0.4));
+        const col = ref >= 10 ? (Math.random() < 0.5 ? 0xff6a00 : 0xffc04d) : Math.random() < 0.5 ? 0x7dfcf0 : 0xffd166;
+        this.vfx.spawnTrailSpark(wp, col, ref >= 10 ? 0.75 : 0.45);
+      }
+    }
   }
 
   private getDamageStat(): { dmg: number; isCrit: boolean } {
@@ -252,6 +344,7 @@ export class PlayerController {
         this.assets.attachToHand(this.mesh, 'weapons/pack_hammer_double.glb', 'right');
       }
       this.vfx.spawnBrackeysBurst(this.pos.clone().add(new THREE.Vector3(0, 1.2, 0)), 'flare', 0xfde047, 2.5, 0.45);
+      this.updateWeaponRefineVisuals();
     }
     this.sound.playUIPopup();
     return true;
@@ -272,7 +365,8 @@ export class PlayerController {
       this.vfx.spawnROText(this.pos.clone().add(new THREE.Vector3(0, 2.2, 0)), 'LEVEL UP!', 'heal');
       this.vfx.spawnBrackeysGroundEffect(this.pos, 'magic_rune', 0xfacc15, 4.2, 0.65, 2);
       this.vfx.spawnBurst(this.pos.clone().add(new THREE.Vector3(0, 1.0, 0)), 0xfde047, 20, 6);
-      this.sound.playUIPopup();
+      this.vfx.spawnConsecratedPillar(this.pos, 0xfacc15, 1.6, 5.5);
+      this.sound.playLevelUp();
       this.onLevelUp?.(this.level);
     }
   }
@@ -301,6 +395,11 @@ export class PlayerController {
     if (this.skill4Cd > 0) this.skill4Cd = Math.max(0, this.skill4Cd - dt);
     if (this.dodgeCd > 0) this.dodgeCd = Math.max(0, this.dodgeCd - dt);
     if (this.iFrames > 0) this.iFrames = Math.max(0, this.iFrames - dt);
+    if (this.endowTimer > 0) {
+      this.endowTimer = Math.max(0, this.endowTimer - dt);
+      if (this.endowTimer <= 0) this.endowElement = null;
+    }
+    this.updateRefineAura(dt);
 
     // Natural RO HP/SP Regen ticks every 3s
     this.regenTickTimer += dt;
@@ -319,17 +418,20 @@ export class PlayerController {
       if (dodgePressed) {
         this.castingSkill = null;
         this.vfx.hideCastCircle();
+        this.sound.stopCastHum(false);
       } else {
         this.castingSkill.timer -= dt;
         const progress = Math.min(1, 1 - this.castingSkill.timer / Math.max(0.01, this.castingSkill.total));
         const castColor = parseInt(this.def.accentHex.slice(1), 16);
         this.vfx.updateCastCircle(this.pos, progress, castColor);
+        this.sound.updateCastHum(progress);
         this.mesh.rotation.y = this.aimYaw;
         this.anim.playLoop('Ranged_Magic_Spellcasting', 0.08, 1.15);
         if (this.castingSkill.timer <= 0) {
           const s = this.castingSkill;
           this.castingSkill = null;
           this.vfx.hideCastCircle();
+          this.sound.stopCastHum(true);
           this.executeROSkill(s.id, s.aimWorld, dungeon, enemies);
         }
         this.updateProjectiles(dt, dungeon, enemies);
@@ -397,6 +499,7 @@ export class PlayerController {
       this.anim.clearOneShot();
       this.anim.playOneShot('Dodge_Forward', 0.05, 1.55, 0.28);
       this.sound.playDodge();
+      this.vfx.kickFov(3.5);
       this.vfx.spawnBurst(this.pos.clone().add(new THREE.Vector3(0, 0.4, 0)), 0x94a3b8, 8, 3.5);
 
       if (this.hasRelic('frost_dodge')) {
@@ -518,6 +621,7 @@ export class PlayerController {
     this.mesh.rotation.y = this.aimYaw;
 
     const combo = this.attackComboIdx++;
+    if (!this.def.isRanged) this.sound.playSwing(derived.aspd, this.def.id === 'barbarian');
     const clip = this.def.attackClips[combo % this.def.attackClips.length];
     const swingSpeed = (this.def.id === 'rogue' ? 1.85 : this.def.id === 'barbarian' ? 1.35 : 1.55) * atkSpdMult;
     this.anim.playOneShot(clip, 0.03, swingSpeed);
@@ -557,9 +661,6 @@ export class PlayerController {
         this.def.id === 'ranger' ? 'arrow' : 'magic'
       );
     } else {
-      if (this.def.id === 'barbarian') this.sound.playAxeThud();
-      else this.sound.playSwordClang();
-
       const reach = this.def.range + (this.hasRelic('ricochet') ? 0.7 : 0);
       const isFullCircle = this.def.id === 'barbarian';
       const isRogue = this.def.id === 'rogue';
@@ -591,8 +692,12 @@ export class PlayerController {
         }
       }
       if (hitAny) {
-        this.vfx.triggerHitStop(isCrit || this.def.id === 'barbarian' ? 0.048 : 0.024);
+        if (this.def.id === 'barbarian') this.sound.at(this.pos).playAxeThud();
+        else this.sound.at(this.pos).playSwordClang();
+        if (isCrit) this.sound.playCrit();
+        this.vfx.triggerHitStop(isCrit ? 0.045 : this.def.id === 'barbarian' ? 0.04 : 0.024);
         this.vfx.addCameraShake(forward, isCrit ? 0.26 : this.def.id === 'barbarian' ? 0.18 : 0.10);
+        if (isCrit) this.vfx.kickFov(1.5);
       }
     }
   }
@@ -632,6 +737,8 @@ export class PlayerController {
     if (castTime <= 0.02) {
       this.executeROSkill(id, aimWorld, dungeon, enemies);
     } else {
+      const humElem = id === 'fire_bolt' || id === 'meteor_storm' ? 'fire' : id === 'lightning_bolt' ? 'wind' : id === 'frost_diver' ? 'water' : 'arcane';
+      this.sound.startCastHum(derived.total.dex, humElem);
       this.castingSkill = {
         id,
         name: `${def.name} Lv.${lv}`,
@@ -660,7 +767,9 @@ export class PlayerController {
       const mult = (1.0 + (lv - 1) * 0.333) * skillMult;
       const stun = lv >= 6 ? 1.2 + (lv - 6) * 0.25 : 0;
       this.anim.playOneShot('UAL2_Shield_Dash', 0.04, 1.35, 0.32);
-      this.sound.playSwordClang(1.25);
+      this.sound.playBash();
+      this.vfx.triggerHitStop(0.055);
+      this.vfx.addCameraShake(forward, 0.3);
       this.vfx.spawnSlashArc(this.pos, this.aimYaw, 3.4, 0xfacc15, false, 0.25);
       this.vfx.spawnBrackeysBurst(this.pos.clone().add(new THREE.Vector3(forward.x * 1.4, 1.0, forward.z * 1.4)), 'spark', 0xfacc15, 2.2, 0.28);
       for (const e of [...enemies.enemies]) {
@@ -679,7 +788,9 @@ export class PlayerController {
       this.sound.playExplosion();
       this.vfx.spawnBrackeysGroundEffect(this.pos, 'scorch', 0xf97316, 4.8, 0.5, 0);
       this.vfx.spawnRing(this.pos, 4.5, 0xf97316, 0.42);
-      this.vfx.addCameraShake(forward, 0.35);
+      this.vfx.addCameraShake(forward, 0.45);
+      this.vfx.kickFov(5);
+      this.vfx.triggerHitStop(0.04);
       this.vfx.spawnROText(this.pos.clone().add(new THREE.Vector3(0, 2.1, 0)), 'FIRE ENDOW!', 'guard');
       for (const e of [...enemies.enemies]) {
         if (!e.dead && e.pos.distanceTo(this.pos) <= 4.5) {
@@ -708,6 +819,7 @@ export class PlayerController {
         this.anim.playOneShot('UAL2_Melee_Hook', 0.04, 1.4, 0.35);
       }
       this.sound.playBattleCry();
+      this.vfx.kickFov(4.5);
       this.vfx.spawnRing(this.pos, 3.6, 0xfacc15, 0.4);
       this.vfx.spawnROText(this.pos.clone().add(new THREE.Vector3(0, 2.1, 0)), 'QUICKEN +ASPD!', 'guard');
     } else if (id === 'fire_bolt' || id === 'lightning_bolt') {
@@ -716,7 +828,8 @@ export class PlayerController {
       const elem: ElementType = isFire ? 'fire1' : 'wind1';
       const color = isFire ? 0xff5500 : 0xfacc15;
       this.anim.playOneShot('Ranged_Magic_Summon', 0.04, 1.5, 0.35);
-      this.sound.playArcaneBlast(isFire ? 1.0 : 1.35);
+      if (isFire) this.sound.playFireBolt(lv);
+      else this.sound.playLightning(lv);
 
       // Target nearest enemy near cursor or aim direction
       let target: Enemy | null = null;
@@ -762,7 +875,7 @@ export class PlayerController {
         enemies.damageEnemy(target, total, dir, elemMult > 1.2, 0, true);
         if (target.dead) {
           this.kills++;
-          this.gold += target.isBoss ? 120 : 12;
+          this.gold += Math.round((target.isBoss ? 120 : 12) * this.goldMult);
           this.grantXp(target.isBoss ? 120 : 25);
         }
       } else {
@@ -772,7 +885,7 @@ export class PlayerController {
     } else if (id === 'frost_diver') {
       // Water projectile that freezes targets solid cyan & sets Water Lv.1
       this.anim.playOneShot('Ranged_Magic_Spellcasting', 0.04, 1.45, 0.35);
-      this.sound.playIceNova();
+      this.sound.playIceShatter(1.3);
       this.vfx.spawnRing(this.pos, 4.8, 0x38bdf8, 0.45);
       for (const e of [...enemies.enemies]) {
         if (!e.dead && e.pos.distanceTo(this.pos) <= 5.5) {
@@ -793,6 +906,7 @@ export class PlayerController {
         const hitPos = targetCenter.clone().add(new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r));
         this.vfx.spawnFallingStrike(hitPos, i % 2 === 0 ? 0xff5500 : 0xfacc15, true, i * 0.1, () => {
           this.vfx.spawnBrackeysGroundEffect(hitPos, 'scorch', 0xff5500, 3.4, 0.45, 0);
+          this.vfx.kickFov(1.2);
           this.triggerAoEExplosion(hitPos, 3.2, Math.round(dmg * (1.3 + lv * 0.15) * skillMult), enemies, -1);
         });
       }
@@ -832,6 +946,10 @@ export class PlayerController {
       const hitCount = Math.min(8, 4 + Math.floor(lv / 2));
       this.anim.playOneShot('Melee_Dualwield_Attack_Slice', 0.04, 1.8, 0.35);
       this.sound.playSwordClang(1.4);
+      this.sound.playCrit();
+      this.vfx.triggerHitStop(0.05);
+      this.vfx.addCameraShake(forward, 0.24);
+      this.vfx.kickFov(3);
       this.vfx.spawnSlashArc(this.pos, this.aimYaw, 3.5, 0x34d399, true);
       for (const e of [...enemies.enemies]) {
         if (!e.dead && e.pos.distanceTo(this.pos) <= 3.8) {
@@ -844,7 +962,7 @@ export class PlayerController {
           enemies.damageEnemy(e, total, dir, true, lv >= 5 ? 0.8 : 0, true);
           if (e.dead) {
             this.kills++;
-            this.gold += e.isBoss ? 120 : 12;
+            this.gold += Math.round((e.isBoss ? 120 : 12) * this.goldMult);
             this.grantXp(e.isBoss ? 120 : 25);
           }
         }
@@ -982,11 +1100,11 @@ export class PlayerController {
   }
 
   private triggerAoEExplosion(center: THREE.Vector3, radius: number, dmg: number, enemies: EnemyManager, skipId: number): void {
-    this.sound.playExplosion();
+    this.sound.at(center).playExplosion();
     this.vfx.spawnSpriteFX(center, 'fire_hit', radius * 1.15, 0xff8833);
     this.vfx.spawnRing(center, radius, 0xff6600, 0.35);
     this.vfx.spawnBurst(center, 0xff8822, 16, 6);
-    this.vfx.addCameraShake(new THREE.Vector3(0, 1, 0), 0.25);
+    this.vfx.addCameraShake(new THREE.Vector3(center.x - this.pos.x, 0, center.z - this.pos.z), 0.3);
     for (const e of [...enemies.enemies]) {
       if (!e.dead && e.id !== skipId && e.pos.distanceTo(center) <= radius) {
         const dir = new THREE.Vector3().subVectors(e.pos, center).setY(0).normalize();
@@ -1013,10 +1131,13 @@ export class PlayerController {
       }
     }
 
+    if (this.endowElement && this.endowTimer > 0) {
+      damage = Math.max(1, Math.round(damage * RagnarokStatsSystem.getElementMultiplier(this.endowElement, enemy.element)));
+    }
     const killed = enemies.damageEnemy(enemy, damage, dir, isCrit, stunSec);
     if (killed) {
       this.kills++;
-      this.gold += enemy.isBoss ? 120 : 12;
+      this.gold += Math.round((enemy.isBoss ? 120 : 12) * this.goldMult);
       this.grantXp(enemy.isBoss ? 120 : 25);
       if (this.hasRelic('berserker_blood')) this.heal(4);
       if (this.hasSkill('executioner_surge')) {
@@ -1066,7 +1187,8 @@ export class PlayerController {
     const guardLv = this.roSkills.getLevel('auto_guard');
     if (guardLv > 0 && Math.random() < 0.05 + guardLv * 0.025) {
       this.iFrames = 0.25;
-      this.sound.playSwordClang(1.35);
+      this.sound.playBlock();
+      MaterialFX.flash(this.mesh, 0xfde68a, 1.2, 0.12);
       this.vfx.spawnBrackeysBurst(this.pos.clone().add(new THREE.Vector3(0, 1.1, 0)), 'spark', 0xfacc15, 1.6, 0.22);
       this.vfx.spawnROText(this.pos.clone().add(new THREE.Vector3(0, 2.0, 0)), 'Guard!', 'guard');
       if (enemies) {
@@ -1094,7 +1216,13 @@ export class PlayerController {
       this.impulseVel.addScaledVector(dir, 6.5);
       this.anim.playOneShot('Hit_A', 0.05, 1.4, 0.22);
     }
-    this.sound.playPlayerHit();
+    if (finalDamage <= 1) {
+      this.sound.playTankClang();
+      MaterialFX.flash(this.mesh, 0xbfdbfe, 0.9, 0.12);
+    } else {
+      this.sound.playPlayerHit();
+      MaterialFX.flash(this.mesh, 0xff2a2a, 1.4, 0.12);
+    }
     this.vfx.addCameraShake(dir, finalDamage <= 1 ? 0.08 : 0.34);
     this.vfx.spawnROText(
       this.pos.clone().add(new THREE.Vector3(0, 1.7, 0)),
@@ -1116,6 +1244,8 @@ export class PlayerController {
   }
 
   public destroy(): void {
+    this.sound.stopCastHum(false);
+    MaterialFX.release(this.mesh);
     this.scene.remove(this.mesh);
     for (const p of this.projectiles) this.scene.remove(p.mesh);
     for (const o of this.orbitingOrbs) this.scene.remove(o);

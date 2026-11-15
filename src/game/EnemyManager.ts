@@ -6,6 +6,7 @@ import { SoundEngine } from '../audio/SoundEngine';
 import { DungeonFloorBuilder } from './DungeonGenerator';
 import { ElementType } from './RagnarokStatsSystem';
 import { RoomData } from '../types';
+import { MaterialFX } from '../graphics/MaterialFX';
 
 export type EnemyKind =
   | 'warrior'
@@ -72,13 +73,113 @@ export interface Enemy {
   squash: number;
   anims: EnemyAnimSet;
   isBoss: boolean;
+  /** Story identity for named bosses (malakor, lyra, vance, warden, mvp). */
+  bossId?: string;
+  windupTotal: number;
 }
+
+export interface BossIdentity {
+  bossId: string;
+  name: string;
+  kind: EnemyKind;
+  model?: string;
+  rWep?: string;
+  lWep?: string;
+  tint?: number;
+  rim?: number;
+  scale?: number;
+  hpMult?: number;
+  dmgMult?: number;
+  anims?: EnemyAnimSet;
+}
+
+const MVP_NAMES = [
+  'Ledger-Wraith Osric',
+  'Gilded Maw',
+  'Debt-Collector Vharn',
+  'Sigil-Eater Morrow',
+  'The Ink-Drowned King',
+  'Hollow Tithe-Knight',
+  'Abyssal Notary',
+];
+
+/** Named boss for each story floor (Endless Abyss floors rotate MVP names). */
+export function bossIdentityForFloor(floorNum: number): BossIdentity {
+  if (floorNum === 1) {
+    return {
+      bossId: 'malakor',
+      name: 'Archivist Malakor',
+      kind: 'boss',
+      model: 'characters/Skeleton_Mage.glb',
+      rWep: 'weapons/Skeleton_Staff.gltf',
+      lWep: undefined,
+      tint: 0x2dd4ff,
+      rim: 0x67e8f9,
+      scale: 2.0,
+    };
+  }
+  if (floorNum === 2) {
+    return {
+      bossId: 'lyra',
+      name: 'Thorn-Weaver Lyra',
+      kind: 'boss',
+      model: 'monsters/MushroomKing.gltf',
+      rWep: undefined,
+      lWep: undefined,
+      tint: 0x22c55e,
+      rim: 0xa3e635,
+      scale: 2.1,
+      hpMult: 1.05,
+      anims: { idle: 'Idle', move: 'Walk', attack: 'Punch', hit: 'HitReact', death: 'Death' },
+    };
+  }
+  if (floorNum === 3) {
+    return {
+      bossId: 'vance',
+      name: 'Mayor Vance, Sovereign of Greed',
+      kind: 'boss',
+      model: 'characters/Mage.glb',
+      rWep: 'weapons/pack_scythe.glb',
+      lWep: undefined,
+      tint: 0xfacc15,
+      rim: 0xfde047,
+      scale: 1.55,
+      hpMult: 0.9,
+    };
+  }
+  const idx = (floorNum - 4) % MVP_NAMES.length;
+  return {
+    bossId: 'mvp',
+    name: `MVP - ${MVP_NAMES[idx]}`,
+    kind: floorNum % 2 === 0 ? 'dragon' : 'boss',
+    tint: floorNum % 2 === 0 ? 0xd946ef : 0x7c3aed,
+    rim: 0xd946ef,
+  };
+}
+
+/** Phase-2 colossus that absorbs Vance's soul. */
+export const ABYSSAL_WARDEN: BossIdentity = {
+  bossId: 'warden',
+  name: 'The Abyssal Warden',
+  kind: 'boss',
+  model: 'monsters/Demon.gltf',
+  rWep: undefined,
+  lWep: undefined,
+  tint: 0x7e22ce,
+  rim: 0xc084fc,
+  scale: 2.6,
+  hpMult: 1.6,
+  dmgMult: 1.15,
+  anims: { idle: 'Idle', move: 'Walk', attack: 'Punch', hit: 'HitReact', death: 'Death' },
+};
 
 export class EnemyManager {
   public enemies: Enemy[] = [];
   public projectiles: EnemyProjectile[] = [];
   private nextId = 1;
   private projGeo = new THREE.SphereGeometry(0.22, 8, 8);
+  /** Fired when a named boss dies (story hooks: Vance -> Warden betrayal, etc.). */
+  public onBossDefeated?: (e: Enemy) => void;
 
   constructor(
     private scene: THREE.Scene,
@@ -90,8 +191,8 @@ export class EnemyManager {
   public spawnWaveForRoom(room: RoomData, floorNum: number): void {
     const scale = 1 + (floorNum - 1) * 0.6;
     if (room.type === 'boss') {
-      const bossKind: EnemyKind = floorNum >= 2 && floorNum % 2 === 0 ? 'dragon' : 'boss';
-      this.spawnEnemy(bossKind, room.worldX, room.worldZ - 3.5, scale);
+      const identity = bossIdentityForFloor(floorNum);
+      this.spawnEnemy(identity.kind, room.worldX, room.worldZ - 3.5, scale, identity);
       this.spawnEnemy(floorNum >= 2 ? 'ghost' : 'rogue', room.worldX - 6, room.worldZ - 5, scale);
       this.spawnEnemy(floorNum >= 2 ? 'demon' : 'mage', room.worldX + 6, room.worldZ - 5, scale);
       this.spawnEnemy('warrior', room.worldX - 4, room.worldZ + 4, scale);
@@ -114,8 +215,8 @@ export class EnemyManager {
     }
   }
 
-  public spawnEnemy(kind: EnemyKind, x: number, z: number, scale = 1): Enemy {
-    const cfg = {
+  public spawnEnemy(kind: EnemyKind, x: number, z: number, scale = 1, identity?: BossIdentity): Enemy {
+    const baseCfg = {
       warrior: {
         model: 'characters/Skeleton_Warrior.glb',
         rWep: 'weapons/Skeleton_Blade.gltf',
@@ -328,6 +429,21 @@ export class EnemyManager {
         isBoss: true,
       },
     }[kind];
+    const cfg = identity
+      ? {
+          ...baseCfg,
+          model: identity.model ?? baseCfg.model,
+          rWep: identity.model ? identity.rWep : baseCfg.rWep,
+          lWep: identity.model ? identity.lWep : baseCfg.lWep,
+          name: identity.name,
+          s: identity.scale ?? baseCfg.s,
+          hp: Math.round(baseCfg.hp * (identity.hpMult ?? 1)),
+          dmg: Math.round(baseCfg.dmg * (identity.dmgMult ?? 1)),
+          tint: identity.tint,
+          isBoss: true,
+          ...(identity.anims ? { anims: identity.anims } : {}),
+        }
+      : baseCfg;
 
     const mesh = this.assets.cloneCharacter(cfg.model);
     mesh.scale.setScalar(cfg.s);
@@ -346,8 +462,14 @@ export class EnemyManager {
       });
     }
 
+    // Fresnel rim + hit-flash/freeze channels on every monster (reuses the KayKit meshes)
+    const tintHex = 'tint' in cfg && cfg.tint ? (cfg.tint as number) : undefined;
+    const rimHex =
+      identity?.rim ?? tintHex ?? (kind === 'demon' || kind === 'imp' || kind === 'dragon' ? 0xff7a3a : 0x7dd3fc);
+    MaterialFX.apply(mesh, rimHex, kind === 'boss' || kind === 'dragon' ? 0.9 : 0.55, 2.4);
+
     if (kind === 'boss' || kind === 'dragon') {
-      const aura = new THREE.PointLight(kind === 'dragon' ? 0xff7722 : 0xff3344, 18, 12);
+      const aura = new THREE.PointLight(identity?.rim ?? (kind === 'dragon' ? 0xff7722 : 0xff3344), 18, 12);
       aura.position.set(0, 2.2, 0);
       mesh.add(aura);
     } else if (kind === 'imp' || kind === 'demon') {
@@ -419,6 +541,8 @@ export class EnemyManager {
       squash: 0,
       anims,
       isBoss,
+      bossId: identity?.bossId,
+      windupTotal: 0.55,
     };
     this.enemies.push(enemy);
     return enemy;
@@ -429,15 +553,9 @@ export class EnemyManager {
     enemy.freezeTimer = Math.max(enemy.freezeTimer, seconds);
     enemy.element = 'water1';
     this.clearTelegraph(enemy);
-    enemy.mesh.traverse((obj) => {
-      if (obj instanceof THREE.Mesh && obj.material instanceof THREE.MeshStandardMaterial) {
-        const cloned = obj.material.clone();
-        cloned.emissive = new THREE.Color(0x38bdf8);
-        cloned.emissiveIntensity = 0.85;
-        cloned.color.lerp(new THREE.Color(0x99f6e4), 0.55);
-        obj.material = cloned;
-      }
-    });
+    // Icy translucent freeze shader (fresnel frost + crystalline glints)
+    MaterialFX.setFrozen(enemy.mesh, true);
+    this.sound.at(enemy.pos).playIceShatter(0.6);
   }
 
   public damageEnemy(
@@ -450,6 +568,8 @@ export class EnemyManager {
   ): boolean {
     if (enemy.dead) return false;
     enemy.hp -= amount;
+    // 0.12s crisp hit flash (gold-white on crits)
+    MaterialFX.flash(enemy.mesh, isCrit ? 0xfff1c2 : 0xffffff, isCrit ? 2.4 : 1.5, 0.12);
     if (!skipPopup) {
       this.vfx.spawnDamageNumber(enemy.pos, amount, isCrit ? 'crit' : 'normal');
     }
@@ -471,9 +591,29 @@ export class EnemyManager {
       enemy.speed *= 1.3;
       this.vfx.spawnRing(enemy.pos, 7, 0xff2244, 0.5);
       this.sound.playExplosion();
-      const addKind: EnemyKind = enemy.kind === 'dragon' ? 'imp' : 'minion';
-      this.spawnEnemy(addKind, enemy.pos.x - 3, enemy.pos.z + 2, 1);
-      this.spawnEnemy(addKind, enemy.pos.x + 3, enemy.pos.z + 2, 1);
+      if (enemy.bossId === 'vance') {
+        // Golden constructs forged from Oakhaven's stolen Zeny
+        const construct: BossIdentity = {
+          bossId: 'construct',
+          name: 'Zeny Construct',
+          kind: 'warrior',
+          tint: 0xfacc15,
+          rim: 0xfde68a,
+          scale: 1.25,
+          hpMult: 0.5,
+          dmgMult: 0.6,
+        };
+        for (const dx of [-3.5, 3.5]) {
+          const c = this.spawnEnemy('warrior', enemy.pos.x + dx, enemy.pos.z + 2, 1, construct);
+          c.isBoss = false;
+          this.vfx.spawnBurst(c.pos.clone().add(new THREE.Vector3(0, 1, 0)), 0xfacc15, 20, 5);
+        }
+        this.sound.playCoinClink(6);
+      } else {
+        const addKind: EnemyKind = enemy.kind === 'dragon' ? 'imp' : 'minion';
+        this.spawnEnemy(addKind, enemy.pos.x - 3, enemy.pos.z + 2, 1);
+        this.spawnEnemy(addKind, enemy.pos.x + 3, enemy.pos.z + 2, 1);
+      }
     }
 
     if (enemy.hp <= 0) {
@@ -484,7 +624,15 @@ export class EnemyManager {
       enemy.anim?.clearOneShot();
       enemy.anim?.playOneShot(enemy.anims.death, 0.08, 1.3, 1.2);
       this.vfx.spawnBoneShatter(enemy.pos, enemy.isBoss ? 34 : 14);
-      this.sound.playBoneShatter();
+      this.sound.at(enemy.pos).playBoneShatter();
+      if (enemy.isBoss) {
+        // Boss finisher: long freeze-frame, heavy trauma and a wide FOV punch
+        this.vfx.triggerHitStop(0.065);
+        this.vfx.addCameraShake(knockDir, 0.6);
+        this.vfx.kickFov(7);
+        this.sound.at(enemy.pos).playBossFinisher();
+        this.onBossDefeated?.(enemy);
+      }
       return true;
     } else if (enemy.state !== 'windup') {
       enemy.anim?.playOneShot(enemy.anims.hit, 0.05, 1.4, 0.22);
@@ -526,6 +674,7 @@ export class EnemyManager {
         }
         if (e.deathTimer <= 0) {
           this.scene.remove(e.mesh);
+          MaterialFX.release(e.mesh);
           this.enemies.splice(i, 1);
         }
         continue;
@@ -561,12 +710,9 @@ export class EnemyManager {
         e.freezeTimer -= dt;
         if (e.freezeTimer <= 0) {
           e.element = e.baseElement;
-          e.mesh.traverse((obj) => {
-            if (obj instanceof THREE.Mesh && obj.material instanceof THREE.MeshStandardMaterial) {
-              obj.material.emissiveIntensity = 0.0;
-              obj.material.color.setHex(0xffffff);
-            }
-          });
+          MaterialFX.setFrozen(e.mesh, false);
+          this.sound.at(e.pos).playIceShatter(0.9);
+          this.vfx.spawnBurst(e.pos.clone().add(new THREE.Vector3(0, 1, 0)), 0x9be7ff, 14, 4.5);
         }
         continue;
       }
@@ -600,8 +746,16 @@ export class EnemyManager {
       } else if (e.state === 'windup') {
         e.stateTimer -= dt;
         if (e.telegraphMesh) {
+          // Crisp crimson warning ring: pulses faster and fills in as the hit approaches
+          const prog = 1 - Math.max(0, e.stateTimer) / Math.max(0.01, e.windupTotal);
           const mat = e.telegraphMesh.material as THREE.MeshBasicMaterial;
-          mat.opacity = 0.35 + Math.sin(performance.now() * 0.025) * 0.2;
+          mat.opacity = 0.3 + prog * 0.35 + Math.sin(performance.now() * (0.02 + prog * 0.04)) * 0.15;
+          const heat = e.isBoss ? 1.4 + prog * 2.2 : 0.9 + prog * 1.2;
+          mat.color.setRGB(heat, 0.06 * heat, 0.1 * heat);
+          if (e.kind !== 'rogue') {
+            const sc = 0.82 + prog * 0.18;
+            e.telegraphMesh.scale.set(sc, 1, sc);
+          }
         }
         if (e.stateTimer <= 0) {
           this.executeAttack(e, playerPos, onPlayerHit);
@@ -615,6 +769,7 @@ export class EnemyManager {
         if (dist <= e.range * 0.9) {
           e.state = 'windup';
           e.stateTimer = e.isBoss ? 0.75 : e.kind === 'rogue' ? 0.65 : 0.55;
+          e.windupTotal = e.stateTimer;
           e.attackTarget.copy(playerPos);
           this.createTelegraph(e, dir);
           e.anim?.playLoop(e.anims.idle, 0.1);
@@ -696,8 +851,8 @@ export class EnemyManager {
 
     if (e.kind === 'rogue' || e.kind === 'imp') {
       e.anim?.playOneShot('Ranged_1H_Shoot', 0.06, 1.3, 0.35);
-      if (e.kind === 'imp') this.sound.playArcaneBlast(0.95);
-      else this.sound.playBowTwang(0.8);
+      if (e.kind === 'imp') this.sound.at(e.pos).playArcaneBlast(0.95);
+      else this.sound.at(e.pos).playBowTwang(0.8);
       this.spawnProjectile(
         e.pos.clone().add(new THREE.Vector3(0, 1.1, 0)),
         dir.multiplyScalar(e.kind === 'imp' ? 11.5 : 13.5),
@@ -706,13 +861,14 @@ export class EnemyManager {
       );
     } else if (e.kind === 'mage') {
       e.anim?.playOneShot('Ranged_Magic_Shoot', 0.06, 1.3, 0.4);
-      this.sound.playArcaneBlast(0.85);
+      this.sound.at(e.pos).playArcaneBlast(0.85);
       this.vfx.spawnRing(e.attackTarget, 2.5, 0xff3366, 0.3);
       const d = Math.hypot(playerPos.x - e.attackTarget.x, playerPos.z - e.attackTarget.z);
       if (d < 2.4) onPlayerHit(e.damage, dir);
     } else if (e.isBoss) {
       e.anim?.playOneShot(e.anims.attack, 0.06, 1.1, 0.5);
-      this.sound.playExplosion();
+      this.sound.at(e.pos).playExplosion();
+      this.vfx.kickFov(2.5);
       const isDragon = e.kind === 'dragon';
       this.vfx.spawnRing(e.pos, 4.4, isDragon ? 0xff7722 : 0xff3344, 0.4);
       this.vfx.addCameraShake(dir, 0.35);
@@ -733,7 +889,7 @@ export class EnemyManager {
     } else {
       e.anim?.playOneShot(e.anims.attack, 0.06, 1.35, 0.35);
       e.vel.addScaledVector(dir, e.kind === 'puglin' || e.kind === 'ghost' ? 7.8 : 5.2);
-      this.sound.playSwordClang(0.65);
+      this.sound.at(e.pos).playSwordClang(0.65);
       const slashCol =
         e.kind === 'slime' ? 0x4ade80 : e.kind === 'ghost' ? 0x38bdf8 : e.kind === 'demon' ? 0xff5522 : e.kind === 'puglin' ? 0xfacc15 : 0xff4444;
       this.vfx.spawnSlashArc(e.pos, Math.atan2(dir.x, dir.z), e.range, slashCol);
@@ -759,6 +915,7 @@ export class EnemyManager {
     for (const e of this.enemies) {
       this.clearTelegraph(e);
       this.scene.remove(e.mesh);
+      MaterialFX.release(e.mesh);
     }
     this.enemies = [];
     for (const p of this.projectiles) {

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { AssetManager } from '../assets/AssetManager';
 import { AnimatorHelper } from '../engine/AnimatorHelper';
 import { RoomData, TownNpcId } from '../types';
+import type { TownView, TownNpcView } from '../systems/TownHubSystem';
 
 export const TILE = 4.0;
 export const ROOM_STEP = 28.0; // 5x5 room (20m) + 2-tile (8m) corridor = 28m center-to-center
@@ -29,8 +30,9 @@ export interface SpikeTrap {
 
 export interface Interactable {
   id: string;
-  kind: 'chest' | 'shrine' | 'trapdoor' | 'npc';
+  kind: 'chest' | 'shrine' | 'trapdoor' | 'npc' | 'echo' | 'mirror';
   npcId?: TownNpcId;
+  echoId?: string;
   x: number;
   z: number;
   mesh: THREE.Object3D;
@@ -42,7 +44,17 @@ export interface Interactable {
 interface TorchLight {
   light: THREE.PointLight;
   baseIntensity: number;
+  baseDistance: number;
   seed: number;
+  flame?: THREE.Object3D;
+}
+
+interface Bobber {
+  obj: THREE.Object3D;
+  baseY: number;
+  speed: number;
+  amp: number;
+  spin: number;
 }
 
 export class DungeonFloorBuilder {
@@ -55,16 +67,22 @@ export class DungeonFloorBuilder {
   private torches: TorchLight[] = [];
   private doorGates: THREE.Object3D[] = [];
   private npcAnimators: AnimatorHelper[] = [];
+  private bobbers: Bobber[] = [];
+  private pulseMats: Array<{ mat: THREE.MeshBasicMaterial; base: THREE.Color; speed: number; amp: number }> = [];
+  /** Town NPC rigs exposed so cutscenes can direct them. */
+  public npcActors = new Map<TownNpcId, { mesh: THREE.Object3D; anim?: AnimatorHelper }>();
+  /** World positions of the town's set-pieces (for cutscene origins / effects). */
+  public obeliskTop = new THREE.Vector3(0, 3.4, -5.2);
   public gatesLocked = false;
   public lockedRoom: RoomData | null = null;
   private gateLerp = 0;
 
   constructor(private assets: AssetManager) {}
 
-  public generate(floorNum: number): void {
+  public generate(floorNum: number, town?: TownView): void {
     this.clear();
     if (floorNum === 0) {
-      this.buildOakhavenTown();
+      this.buildOakhavenTown(town);
       return;
     }
 
@@ -222,7 +240,7 @@ export class DungeonFloorBuilder {
     return sprite;
   }
 
-  private buildOakhavenTown(): void {
+  private buildOakhavenTown(view?: TownView): void {
     const townRoom: RoomData = {
       gx: 0,
       gy: 0,
@@ -259,145 +277,279 @@ export class DungeonFloorBuilder {
         { x: -hw, z: i * TILE, ry: Math.PI / 2 },
         { x: hw, z: i * TILE, ry: -Math.PI / 2 },
       ];
-      for (const s of segs) {
+      for (const sg of segs) {
         const w = this.assets.cloneProp('dungeon/wall.gltf.glb');
-        w.position.set(s.x, 0, s.z);
-        w.rotation.y = s.ry;
+        w.position.set(sg.x, 0, sg.z);
+        w.rotation.y = sg.ry;
         this.group.add(w);
       }
     }
 
-    const townLight = new THREE.PointLight(0xffdca8, 3.2, 34);
+    const dawn = view?.dawn ?? false;
+    const townLight = new THREE.PointLight(dawn ? 0xffe2a8 : 0xffcf99, dawn ? 6 : 3.2, 34);
     townLight.position.set(0, 6.5, 0);
     this.group.add(townLight);
 
-    const npcs: Array<{
-      npcId: TownNpcId;
-      model: string;
-      scale?: number;
-      idleClip?: string;
-      rightWeapon?: string;
-      leftWeapon?: string;
-      prop?: string;
-      x: number;
-      z: number;
-      ry: number;
-      tag: string;
-      color: string;
-      prompt: string;
-    }> = [
-      {
-        npcId: 'blacksmith',
-        model: 'characters/Barbarian.glb',
-        idleClip: 'Idle_A',
-        rightWeapon: 'weapons/pack_hammer_double.glb',
-        prop: 'props_fantasy/Anvil.gltf',
-        x: -7.5,
-        z: -5.5,
-        ry: 0.6,
-        tag: '[⚒] Runesmith Torgar',
-        color: '#f97316',
-        prompt: '[E] Runesmith Torgar (Weapon & Armor Refine)',
-      },
-      {
-        npcId: 'kafra',
-        model: 'characters/Ranger.glb',
-        idleClip: 'Idle_A',
-        leftWeapon: 'weapons/pack_bow_golden.glb',
-        prop: 'dungeon/chest_rare.gltf.glb',
-        x: 7.5,
-        z: -5.5,
-        ry: -0.6,
-        tag: '[📦] Vault Keeper Pip',
-        color: '#38bdf8',
-        prompt: '[E] Vault Keeper Pip (Monster Sigil Vault)',
-      },
-      {
-        npcId: 'hypnotist',
-        model: 'characters/Mage.glb',
-        idleClip: 'Idle_A',
-        rightWeapon: 'weapons/staff.gltf',
-        prop: 'props_fantasy/BookStand.gltf',
-        x: -7.5,
-        z: 5.5,
-        ry: 2.5,
-        tag: '[✦] Soul Weaver Vaelen',
-        color: '#c084fc',
-        prompt: '[E] Soul Weaver Vaelen (Stat & Skill Reset)',
-      },
-      {
-        npcId: 'alchemist',
-        model: 'characters/Rogue_Hooded.glb',
-        idleClip: 'Idle_A',
-        rightWeapon: 'weapons/pack_dagger.glb',
-        prop: 'props_fantasy/Cauldron.gltf',
-        x: 7.5,
-        z: 5.5,
-        ry: -2.5,
-        tag: '[⚗] Apothecary Sera',
-        color: '#34d399',
-        prompt: '[E] Apothecary Sera (Crimson & Azure Elixirs)',
-      },
-      {
-        npcId: 'guildmaster',
-        model: 'characters/Knight.glb',
-        idleClip: 'Idle_A',
-        rightWeapon: 'weapons/pack_sword_golden.glb',
-        leftWeapon: 'weapons/pack_shield_celtic.glb',
-        prop: 'props_fantasy/Banner_1.gltf',
-        x: 0,
-        z: -8.5,
-        ry: 0,
-        tag: '[!] Warden Aldric',
-        color: '#facc15',
-        prompt: '[E] Warden Aldric — Enter Sunken Crypt (Floor 1)',
-      },
-    ];
+    // ── Royal Seal obelisk (the sealed Spire entrance) ──
+    const obelisk = this.assets.cloneProp('dungeon/pillar.gltf.glb');
+    obelisk.position.set(0, 0, -5.2);
+    obelisk.scale.set(1.25, 1.35, 1.25);
+    this.group.add(obelisk);
+    const crystalMat = new THREE.MeshBasicMaterial({ color: dawn ? 0xffd166 : 0xa855f7 });
+    const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.42, 0), crystalMat);
+    crystal.position.set(0, 3.55, -5.2);
+    this.group.add(crystal);
+    this.bobbers.push({ obj: crystal, baseY: 3.55, speed: 1.6, amp: 0.12, spin: 0.9 });
+    this.pulseMats.push({ mat: crystalMat, base: new THREE.Color(dawn ? 0xffd166 : 0xa855f7).multiplyScalar(2.2), speed: 2.2, amp: 0.35 });
+    const sealLight = new THREE.PointLight(dawn ? 0xffd166 : 0xa855f7, 7, 12, 1.6);
+    sealLight.position.set(0, 3.4, -5.2);
+    this.group.add(sealLight);
+    this.torches.push({ light: sealLight, baseIntensity: 7, baseDistance: 12, seed: 3.3 });
+    this.obstacles.push({ x: 0, z: -5.2, r: 0.9 });
 
-    for (const n of npcs) {
-      const charMesh = this.assets.cloneCharacter(n.model);
-      if (n.scale) charMesh.scale.setScalar(n.scale);
-      if (n.rightWeapon) this.assets.attachToHand(charMesh, n.rightWeapon, 'right');
-      if (n.leftWeapon) this.assets.attachToHand(charMesh, n.leftWeapon, 'left');
-      charMesh.position.set(n.x, 0, n.z);
-      charMesh.rotation.y = n.ry;
+    // ── Harvest Bonfire (warm hearth key-light for the whole square) ──
+    const bonfire = new THREE.Group();
+    bonfire.position.set(0, 0, 3.6);
+    const logMat = new THREE.MeshStandardMaterial({ color: 0x3b2414, roughness: 0.95 });
+    for (let i = 0; i < 6; i++) {
+      const log = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.13, 1.5, 6), logMat);
+      const a = (i / 6) * Math.PI * 2;
+      log.position.set(Math.cos(a) * 0.32, 0.45, Math.sin(a) * 0.32);
+      log.rotation.set(Math.sin(a) * 0.5, 0, -Math.cos(a) * 0.5);
+      log.castShadow = true;
+      bonfire.add(log);
+    }
+    const flameMatA = new THREE.MeshBasicMaterial({ color: 0xff7a1a, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false });
+    const flameMatB = new THREE.MeshBasicMaterial({ color: 0xffd166, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false });
+    const flameA = new THREE.Mesh(new THREE.ConeGeometry(0.55, 1.7, 8, 1, true), flameMatA);
+    flameA.position.y = 1.15;
+    const flameB = new THREE.Mesh(new THREE.ConeGeometry(0.3, 1.1, 8, 1, true), flameMatB);
+    flameB.position.y = 0.95;
+    bonfire.add(flameA, flameB);
+    this.pulseMats.push({ mat: flameMatA, base: new THREE.Color(0xff7a1a).multiplyScalar(dawn ? 1.6 : 2.4), speed: 11, amp: 0.25 });
+    this.pulseMats.push({ mat: flameMatB, base: new THREE.Color(0xffd166).multiplyScalar(dawn ? 1.8 : 2.8), speed: 15, amp: 0.3 });
+    this.group.add(bonfire);
+    const hearth = new THREE.PointLight(0xff9a3c, dawn ? 10 : 22, 20, 1.5);
+    hearth.position.set(0, 1.6, 3.6);
+    hearth.castShadow = true;
+    hearth.shadow.mapSize.set(512, 512);
+    hearth.shadow.bias = -0.002;
+    this.group.add(hearth);
+    this.torches.push({ light: hearth, baseIntensity: hearth.intensity, baseDistance: 20, seed: 1.7, flame: flameA });
+    this.obstacles.push({ x: 0, z: 3.6, r: 1.0 });
+
+    // ── Standing braziers at the square's corners ──
+    for (const [bx, bz] of [[-11, -11], [11, -11], [-11, 11], [11, 11], [-3.2, -9.6], [3.2, -9.6]] as Array<[number, number]>) {
+      const t = this.assets.cloneProp('dungeon/torch.gltf.glb');
+      t.position.set(bx, 0, bz);
+      t.scale.setScalar(1.4);
+      this.group.add(t);
+      const l = new THREE.PointLight(0xff8a33, 9, 11, 1.7);
+      l.position.set(bx, 2.6, bz);
+      this.group.add(l);
+      this.torches.push({ light: l, baseIntensity: 9, baseDistance: 11, seed: Math.random() * 100 });
+      this.obstacles.push({ x: bx, z: bz, r: 0.4 });
+    }
+
+    const layout: Record<TownNpcId, { model: string; rightWeapon?: string; leftWeapon?: string; prop?: string; x: number; z: number; ry: number }> = {
+      blacksmith: { model: 'characters/Barbarian.glb', rightWeapon: 'weapons/pack_hammer_double.glb', prop: 'props_fantasy/Anvil.gltf', x: -7.5, z: -5.5, ry: 0.6 },
+      kafra: { model: 'characters/Ranger.glb', leftWeapon: 'weapons/pack_bow_golden.glb', prop: 'dungeon/chest_rare.gltf.glb', x: 7.5, z: -5.5, ry: -0.6 },
+      hypnotist: { model: 'characters/Mage.glb', rightWeapon: 'weapons/staff.gltf', prop: 'props_fantasy/BookStand.gltf', x: -7.5, z: 5.5, ry: 2.5 },
+      alchemist: { model: 'characters/Rogue_Hooded.glb', rightWeapon: 'weapons/pack_dagger.glb', prop: 'props_fantasy/Cauldron.gltf', x: 7.5, z: 5.5, ry: -2.5 },
+      guildmaster: { model: 'characters/Knight.glb', rightWeapon: 'weapons/pack_sword_golden.glb', leftWeapon: 'weapons/pack_shield_celtic.glb', prop: 'props_fantasy/Banner_1.gltf', x: 0, z: -8.5, ry: 0 },
+    };
+    const fallback: Record<TownNpcId, TownNpcView> = {
+      blacksmith: { npcId: 'blacksmith', name: 'Garrett', title: 'Master Blacksmith', tag: '[⚒] Garrett', color: '#f97316', marker: '', prompt: '[E] Talk to Garrett', chained: false },
+      kafra: { npcId: 'kafra', name: 'Pip', title: 'Vault Keeper', tag: '[📦] Pip', color: '#38bdf8', marker: '', prompt: '[E] Talk to Pip', chained: false },
+      hypnotist: { npcId: 'hypnotist', name: 'Vaelen', title: 'Soul Weaver', tag: '[✦] Vaelen', color: '#c084fc', marker: '', prompt: '[E] Talk to Vaelen', chained: false },
+      alchemist: { npcId: 'alchemist', name: 'Mira', title: 'Alchemist', tag: '[⚗] Mira', color: '#34d399', marker: '', prompt: '[E] Talk to Mira', chained: false },
+      guildmaster: { npcId: 'guildmaster', name: 'Warden Aldric', title: 'Captain of the Watch', tag: '[⛨] Warden Aldric', color: '#facc15', marker: '', prompt: '[E] Talk to Warden Aldric', chained: false },
+    };
+    const views = view?.npcs ?? Object.values(fallback);
+
+    for (const n of views) {
+      const L = layout[n.npcId];
+      const charMesh = this.assets.cloneCharacter(L.model);
+      if (L.rightWeapon) this.assets.attachToHand(charMesh, L.rightWeapon, 'right');
+      if (L.leftWeapon) this.assets.attachToHand(charMesh, L.leftWeapon, 'left');
+      charMesh.position.set(L.x, 0, L.z);
+      charMesh.rotation.y = L.ry;
       this.group.add(charMesh);
 
-      if (n.idleClip) {
-        const npcAnim = new AnimatorHelper(charMesh, this.assets);
-        npcAnim.playLoop(n.idleClip, 0.1);
-        this.npcAnimators.push(npcAnim);
-      }
+      const npcAnim = new AnimatorHelper(charMesh, this.assets);
+      npcAnim.playLoop('Idle_A', 0.1);
+      this.npcAnimators.push(npcAnim);
+      this.npcActors.set(n.npcId, { mesh: charMesh, anim: npcAnim });
 
       const labelSprite = this.createNpcLabelSprite(n.tag, n.color);
-      labelSprite.position.set(n.x, 2.75, n.z);
+      labelSprite.position.set(L.x, 2.75, L.z);
       this.group.add(labelSprite);
 
-      if (n.prop) {
-        const propMesh = this.assets.cloneProp(n.prop);
-        propMesh.position.set(n.x + (n.x < 0 ? 1.5 : -1.5), 0, n.z + 0.6);
+      if (n.marker) {
+        const marker = this.createMarkerSprite(n.marker);
+        marker.position.set(L.x, 3.55, L.z);
+        this.group.add(marker);
+        this.bobbers.push({ obj: marker, baseY: 3.55, speed: 3.2, amp: 0.16, spin: 0 });
+      }
+
+      if (L.prop) {
+        const propMesh = this.assets.cloneProp(L.prop);
+        propMesh.position.set(L.x + (L.x < 0 ? 1.5 : L.x > 0 ? -1.5 : 1.6), 0, L.z + 0.6);
         this.group.add(propMesh);
       }
 
-      this.obstacles.push({ x: n.x, z: n.z, r: 0.75 });
+      // Each shopfront gets its own warm lamp so the square reads at a glance
+      const lamp = new THREE.PointLight(new THREE.Color(n.color).lerp(new THREE.Color(0xffc48a), 0.6), 4, 7, 1.8);
+      lamp.position.set(L.x, 2.6, L.z + (L.z < 0 ? 1.2 : -1.2));
+      this.group.add(lamp);
+      this.torches.push({ light: lamp, baseIntensity: 4, baseDistance: 7, seed: Math.random() * 100 });
+
+      this.obstacles.push({ x: L.x, z: L.z, r: 0.75 });
       this.interactables.push({
         id: `npc_${n.npcId}`,
-        kind: n.npcId === 'guildmaster' ? 'trapdoor' : 'npc',
+        kind: 'npc',
         npcId: n.npcId,
-        x: n.x,
-        z: n.z,
+        x: L.x,
+        z: L.z,
         mesh: charMesh,
         used: false,
         label: n.prompt,
       });
+
+      // Persistent Soul-Debt chain from the obelisk to every bound villager
+      if (view?.chains) this.addChain(this.obeliskTop, new THREE.Vector3(L.x, 1.2, L.z), 0xa855f7);
     }
 
     const portal = this.assets.cloneProp('dungeon/trapdoor.gltf.glb');
     portal.position.set(0, 0.04, -10.5);
     this.group.add(portal);
-    const portalLight = new THREE.PointLight(0x38bdf8, 3.0, 9);
+    const portalLight = new THREE.PointLight(dawn ? 0xd946ef : 0x7c3aed, 4.0, 9);
     portalLight.position.set(0, 1.5, -10.5);
     this.group.add(portalLight);
+    this.torches.push({ light: portalLight, baseIntensity: 4, baseDistance: 9, seed: 7.7 });
+  }
+
+  private createMarkerSprite(marker: string): THREE.Sprite {
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d')!;
+    const color = marker === '!' ? '#facc15' : marker === '★' ? '#fde047' : marker === '⛓' ? '#c084fc' : '#7dd3fc';
+    const grd = ctx.createRadialGradient(64, 64, 8, 64, 64, 62);
+    grd.addColorStop(0, 'rgba(255,255,255,0.35)');
+    grd.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = grd;
+    ctx.fillRect(0, 0, 128, 128);
+    ctx.font = 'bold 84px Segoe UI, Segoe UI Symbol, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineWidth = 8;
+    ctx.strokeStyle = 'rgba(10,8,20,0.9)';
+    ctx.strokeText(marker, 64, 68);
+    ctx.fillStyle = color;
+    ctx.fillText(marker, 64, 68);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+    // Slight HDR boost so the marker catches a touch of bloom
+    mat.color.setScalar(marker === '!' ? 1.6 : 1.2);
+    const sprite = new THREE.Sprite(mat);
+    sprite.scale.set(0.9, 0.9, 1);
+    sprite.renderOrder = 10;
+    return sprite;
+  }
+
+  /** Static glowing chain (catenary tube + links) used for the town's Soul-Debt bindings. */
+  private addChain(from: THREE.Vector3, to: THREE.Vector3, color: number): void {
+    const mid = from.clone().lerp(to, 0.5);
+    mid.y = Math.min(from.y, to.y) - 0.5;
+    const curve = new THREE.CatmullRomCurve3([from.clone(), from.clone().lerp(mid, 0.5).setY(from.y - 0.25), mid, to.clone()]);
+    const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false });
+    this.pulseMats.push({ mat, base: new THREE.Color(color).multiplyScalar(1.7), speed: 2.6 + Math.random(), amp: 0.45 });
+    this.group.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 40, 0.04, 5, false), mat));
+    const linkGeo = new THREE.TorusGeometry(0.1, 0.024, 4, 10);
+    for (let i = 1; i < 12; i++) {
+      const t = i / 12;
+      const link = new THREE.Mesh(linkGeo, mat);
+      link.position.copy(curve.getPointAt(t));
+      link.lookAt(curve.getPointAt(Math.min(1, t + 0.02)));
+      if (i % 2 === 1) link.rotateZ(Math.PI * 0.5);
+      this.group.add(link);
+    }
+  }
+
+  /** Echo Shard: a floating memory crystal that replays a clue when touched. */
+  public spawnEchoShard(x: number, z: number, echoId: string, color: number, title: string): void {
+    const grp = new THREE.Group();
+    grp.position.set(x, 0, z);
+    const mat = new THREE.MeshBasicMaterial({ color });
+    const core = new THREE.Mesh(new THREE.OctahedronGeometry(0.34, 0), mat);
+    core.scale.set(0.8, 1.6, 0.8);
+    core.position.y = 1.3;
+    grp.add(core);
+    const shellMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.25, blending: THREE.AdditiveBlending, depthWrite: false, wireframe: true });
+    const shell = new THREE.Mesh(new THREE.IcosahedronGeometry(0.62, 0), shellMat);
+    shell.position.y = 1.3;
+    grp.add(shell);
+    const ringMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.55, 0.7, 32), ringMat);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.06;
+    grp.add(ring);
+    this.group.add(grp);
+    this.bobbers.push({ obj: core, baseY: 1.3, speed: 2.0, amp: 0.15, spin: 1.4 });
+    this.bobbers.push({ obj: shell, baseY: 1.3, speed: 2.0, amp: 0.15, spin: -0.7 });
+    this.pulseMats.push({ mat, base: new THREE.Color(color).multiplyScalar(2.6), speed: 3.0, amp: 0.4 });
+    const light = new THREE.PointLight(color, 9, 8, 1.8);
+    light.position.set(x, 1.6, z);
+    this.group.add(light);
+    this.torches.push({ light, baseIntensity: 9, baseDistance: 8, seed: Math.random() * 100 });
+    this.interactables.push({
+      id: `echo_${echoId}`,
+      kind: 'echo',
+      echoId,
+      x,
+      z,
+      mesh: grp,
+      light,
+      used: false,
+      label: `[E] Touch Echo Shard — "${title}"`,
+    });
+  }
+
+  /** The Obsidian Mirror at the heart of Floor 2 (auto-triggers the twist cutscene). */
+  public spawnObsidianMirror(x: number, z: number): void {
+    const grp = new THREE.Group();
+    grp.position.set(x, 0, z);
+    const slab = new THREE.Mesh(
+      new THREE.BoxGeometry(2.0, 3.6, 0.3),
+      new THREE.MeshStandardMaterial({ color: 0x07060c, metalness: 0.95, roughness: 0.08, emissive: 0x1e1b4b, emissiveIntensity: 0.6 })
+    );
+    slab.position.set(0, 1.9, -1.6);
+    slab.castShadow = true;
+    grp.add(slab);
+    const frameMat = new THREE.MeshBasicMaterial({ color: 0x818cf8 });
+    const frame = new THREE.Mesh(new THREE.TorusGeometry(1.25, 0.05, 6, 40), frameMat);
+    frame.scale.set(0.85, 1.5, 1);
+    frame.position.set(0, 1.9, -1.42);
+    grp.add(frame);
+    this.pulseMats.push({ mat: frameMat, base: new THREE.Color(0x818cf8).multiplyScalar(2.2), speed: 1.6, amp: 0.4 });
+    this.group.add(grp);
+    const light = new THREE.PointLight(0x818cf8, 12, 12, 1.6);
+    light.position.set(x, 2.6, z - 0.6);
+    this.group.add(light);
+    this.torches.push({ light, baseIntensity: 12, baseDistance: 12, seed: 4.2 });
+    this.obstacles.push({ x, z: z - 1.6, r: 1.1 });
+    this.interactables.push({
+      id: 'obsidian_mirror',
+      kind: 'mirror',
+      x,
+      z,
+      mesh: grp,
+      light,
+      used: false,
+      label: '[E] Gaze into the Obsidian Mirror',
+    });
   }
 
   private buildRoom(room: RoomData): void {
@@ -491,7 +643,7 @@ export class DungeonFloorBuilder {
         const light = new THREE.PointLight(0xff8a33, room.type === 'boss' ? 18 : 14, 18, 1.6);
         light.position.set(tp.x, 2.5, tp.z);
         this.group.add(light);
-        this.torches.push({ light, baseIntensity: light.intensity, seed: Math.random() * 100 });
+        this.torches.push({ light, baseIntensity: light.intensity, baseDistance: light.distance, seed: Math.random() * 100 });
       }
     }
 
@@ -739,10 +891,22 @@ export class DungeonFloorBuilder {
     for (const anim of this.npcAnimators) {
       anim.update(dt);
     }
-    // Flicker wall torches
+    // Flicker torches/braziers: sinusoidal intensity + radius jitter
     for (const t of this.torches) {
-      const f = Math.sin(elapsed * 9.5 + t.seed) * 0.12 + Math.sin(elapsed * 23 + t.seed * 2) * 0.06;
+      const f = Math.sin(elapsed * 9.5 + t.seed) * 0.12 + Math.sin(elapsed * 23 + t.seed * 2) * 0.06 + Math.sin(elapsed * 3.1 + t.seed * 5) * 0.05;
       t.light.intensity = t.baseIntensity * (1 + f);
+      t.light.distance = t.baseDistance * (1 + Math.sin(elapsed * 6.7 + t.seed * 3) * 0.05);
+      if (t.flame) {
+        t.flame.scale.set(1 + f * 0.4, 1 + f * 1.2, 1 + f * 0.4);
+        t.flame.rotation.y += dt * 1.5;
+      }
+    }
+    for (const b of this.bobbers) {
+      b.obj.position.y = b.baseY + Math.sin(elapsed * b.speed) * b.amp;
+      b.obj.rotation.y += dt * b.spin;
+    }
+    for (const pm of this.pulseMats) {
+      pm.mat.color.copy(pm.base).multiplyScalar(1 + Math.sin(elapsed * pm.speed) * pm.amp);
     }
 
     // Animate swinging door gates (0 = closed, 1 = swung open 105 deg)
@@ -781,6 +945,9 @@ export class DungeonFloorBuilder {
     this.torches = [];
     this.doorGates = [];
     this.npcAnimators = [];
+    this.bobbers = [];
+    this.pulseMats = [];
+    this.npcActors.clear();
     this.gatesLocked = false;
     this.lockedRoom = null;
     this.gateLerp = 1;
