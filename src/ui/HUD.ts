@@ -24,6 +24,7 @@ export interface ROCallbacks {
 export class HUDManager {
   private root: HTMLElement;
   private lastPhase = '';
+  private lastModalKey = '';
   private lastClass: HeroClassId | '' = '';
   private minimapCanvas: HTMLCanvasElement | null = null;
   private showingCodex = false;
@@ -136,20 +137,40 @@ export class HUDManager {
     }
 
     if (state.phase === 'stats_window') {
-      this.lastPhase = 'stats_window';
-      this.renderStatsWindow(state);
+      const key = JSON.stringify([state.statPoints, state.roBase, state.weaponRefine, state.armorRefine]);
+      if (this.lastPhase !== 'stats_window' || this.lastModalKey !== key) {
+        this.lastPhase = 'stats_window';
+        this.lastModalKey = key;
+        this.renderStatsWindow(state);
+      }
       return;
     }
 
     if (state.phase === 'npc_modal') {
-      this.lastPhase = 'npc_modal';
-      this.renderNpcModal(state);
+      const key = JSON.stringify([
+        state.activeNpc,
+        state.gold,
+        state.weaponRefine,
+        state.armorRefine,
+        state.redPotions,
+        state.bluePotions,
+        state.equippedCard?.id ?? null,
+      ]);
+      if (this.lastPhase !== 'npc_modal' || this.lastModalKey !== key) {
+        this.lastPhase = 'npc_modal';
+        this.lastModalKey = key;
+        this.renderNpcModal(state);
+      }
       return;
     }
 
     if (state.phase === 'skill_tree') {
-      this.lastPhase = 'skill_tree';
-      this.renderSkillTree(state);
+      const key = JSON.stringify([state.roSkillPoints, state.roSkills]);
+      if (this.lastPhase !== 'skill_tree' || this.lastModalKey !== key) {
+        this.lastPhase = 'skill_tree';
+        this.lastModalKey = key;
+        this.renderSkillTree(state);
+      }
       return;
     }
 
@@ -724,8 +745,10 @@ export class HUDManager {
           <div style="background:rgba(16,14,24,0.92);border:1px solid rgba(255,255,255,0.14);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:8px">
             <div style="font-size:12px;color:#7dd3fc;font-weight:700;text-transform:uppercase">Base Stats</div>
             ${statsList
-              .map(
-                (s) => `
+              .map((s) => {
+                const cost = Math.floor((s.val - 1) / 10) + 2;
+                const canAdd = state.statPoints >= cost && s.val < 99;
+                return `
               <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.06)">
                 <div>
                   <strong style="color:#fff">${s.label}</strong>
@@ -733,12 +756,12 @@ export class HUDManager {
                 </div>
                 <div style="display:flex;align-items:center;gap:8px">
                   <strong style="color:#fde047">${s.val}</strong>
-                  <button class="class-tab ro-stat-btn" data-stat="${s.key}" ${state.statPoints > 0 ? '' : 'disabled'}
-                    style="padding:3px 9px;font-size:12px;opacity:${state.statPoints > 0 ? '1' : '0.4'}">+</button>
+                  <button class="class-tab ro-stat-btn" data-stat="${s.key}" ${canAdd ? '' : 'disabled'}
+                    style="padding:3px 9px;font-size:12px;opacity:${canAdd ? '1' : '0.4'};cursor:${canAdd ? 'pointer' : 'default'}">+ (${cost})</button>
                 </div>
               </div>
-            `
-              )
+            `;
+              })
               .join('')}
           </div>
           <div style="background:rgba(16,14,24,0.92);border:1px solid rgba(255,255,255,0.14);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:7px;font-size:13px">
