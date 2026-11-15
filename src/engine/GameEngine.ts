@@ -18,6 +18,15 @@ import type { ROSkillId } from '../game/SkillSystem';
 import { VFXManager } from './VFXManager';
 import { AnimatorHelper } from './AnimatorHelper';
 import { CutsceneManager } from './CutsceneManager';
+import { CutsceneDirector } from '../systems/CutsceneDirector';
+import {
+  runAct0Foreclosure,
+  runAct1ForgedSignature,
+  runAct1TorgarConfession,
+  runAct2AuditorsName,
+  runAct3AshenPact,
+  runAct3Sunrise,
+} from '../data/StoryCampaign';
 
 export class GameEngine {
   private renderer: THREE.WebGLRenderer;
@@ -32,6 +41,7 @@ export class GameEngine {
   private enemies: EnemyManager;
   private hud: HUDManager;
   private cutscenes = new CutsceneManager();
+  private director: CutsceneDirector;
 
   private player: PlayerController | null = null;
   private previewModel: THREE.Group | null = null;
@@ -105,6 +115,7 @@ export class GameEngine {
     this.dungeon = new DungeonFloorBuilder(this.assets);
     this.scene.add(this.dungeon.group);
     this.enemies = new EnemyManager(this.scene, this.assets, this.vfx, this.sound);
+    this.director = new CutsceneDirector(this.scene, this.camera, this.assets, this.vfx, this.sound);
 
     this.hud = new HUDManager(
       (id) => this.selectPreviewClass(id),
@@ -308,21 +319,16 @@ export class GameEngine {
     this.player.onLevelUp = (lvl) => {
       this.showBanner(`LEVEL ${lvl}! [U] Stats & [K] Skills`);
     };
+    this.director.registerActor('player', this.player.mesh, this.player.anim);
     this.buildFloor(0);
     this.phase = 'playing';
     this.player.anim.playOneShot('Spawn_Ground', 0.05, 1.0, 1.1);
     this.sound.setMusicMode('explore');
-    this.sound.playCinematicWhoosh();
-    this.cutscenes.play({
-      duration: 2.4,
-      startPos: new THREE.Vector3(0, 18, 20),
-      endPos: new THREE.Vector3(0, 14.5, 11.5),
-      startLook: new THREE.Vector3(0, 1.8, -3),
-      endLook: new THREE.Vector3(0, 0.8, 0),
-      title: 'Oakhaven Town Hub',
-      subtitle: 'Visit Runesmith Torgar, Vault Keeper Pip, Apothecary Sera — or speak to Warden Aldric.',
-      onComplete: () => this.showBanner('Oakhaven Town — Press [U] Stats | [K] Skills'),
-    });
+    void this.director.play(
+      'act0_foreclosure',
+      (d) => runAct0Foreclosure(d, this.player!.pos),
+      () => this.showBanner('Oakhaven Town — Speak to Warden Aldric [!] to Enter Crypt')
+    );
   }
 
   private returnToTitle(): void {
@@ -356,6 +362,11 @@ export class GameEngine {
       this.player.pos.set(0, 0, 0);
     }
     this.sound.setCombatIntensity(0.1);
+    if (floorNum === 2) {
+      void this.director.play('act2_auditors_name', (d) => runAct2AuditorsName(d));
+    } else if (floorNum === 0 && this.director.hasPlayed('act1_forged_signature')) {
+      void this.director.play('act1_torgar_confession', (d) => runAct1TorgarConfession(d));
+    }
   }
 
   private toggleStatsWindow(): void {
@@ -394,6 +405,15 @@ export class GameEngine {
 
     window.addEventListener('keydown', (e) => {
       const k = e.key.toLowerCase();
+      if (this.director.active) {
+        if (k === 'escape') {
+          this.director.skip();
+        } else if (k === ' ' || k === 'enter') {
+          e.preventDefault();
+          this.director.overlay.handleAdvanceInput();
+        }
+        return;
+      }
       if (this.cutscenes.active && (k === ' ' || k === 'escape')) {
         this.cutscenes.skip();
         return;
@@ -487,6 +507,17 @@ export class GameEngine {
     }
 
     if (this.phase === 'playing' && this.player) {
+      if (this.director.active) {
+        this.player.anim.update(rawDt);
+        this.enemies.enemies.forEach((e) => e.anim?.update(rawDt));
+        this.dungeon.update(rawDt, elapsed);
+        this.sound.update(rawDt);
+        this.vfx.update(rawDt, this.camera);
+        this.director.update(rawDt);
+        this.composer.render();
+        return;
+      }
+
       if (this.cutscenes.active) {
         this.player.anim.update(rawDt);
         this.enemies.enemies.forEach((e) => e.anim?.update(rawDt));
@@ -556,16 +587,23 @@ export class GameEngine {
             boss.anim?.clearOneShot();
             boss.anim?.playOneShot('Skeletons_Taunt_Longer', 0.08, 1.05, 2.5);
             this.vfx.spawnRing(boss.pos, 6.0, 0xff2244, 0.7);
-            this.cutscenes.play({
-              duration: 3.1,
-              startPos: new THREE.Vector3(this.player.pos.x, 12, this.player.pos.z + 10),
-              endPos: new THREE.Vector3(boss.pos.x, 5.2, boss.pos.z + 7.5),
-              startLook: this.player.pos.clone(),
-              endLook: boss.pos.clone().add(new THREE.Vector3(0, 1.8, 0)),
-              title: 'Dread Bone Colossus',
-              subtitle: `Warden of Floor ${this.floor}`,
-              onComplete: () => this.showBanner('Boss Chamber — Dread Bone Colossus'),
-            });
+            const roomCenter = new THREE.Vector3(interiorRoom.worldX, 0, interiorRoom.worldZ);
+            if (this.floor === 1 && !this.director.hasPlayed('act1_forged_signature')) {
+              void this.director.play('act1_forged_signature', (d) => runAct1ForgedSignature(d, roomCenter));
+            } else if (this.floor === 3 && !this.director.hasPlayed('act3_ashen_pact')) {
+              void this.director.play('act3_ashen_pact', (d) => runAct3AshenPact(d, roomCenter));
+            } else {
+              this.cutscenes.play({
+                duration: 2.6,
+                startPos: new THREE.Vector3(this.player.pos.x, 12, this.player.pos.z + 10),
+                endPos: new THREE.Vector3(boss.pos.x, 5.2, boss.pos.z + 7.5),
+                startLook: this.player.pos.clone(),
+                endLook: boss.pos.clone().add(new THREE.Vector3(0, 1.8, 0)),
+                title: boss.name,
+                subtitle: `Warden of Floor ${this.floor}`,
+                onComplete: () => this.showBanner(`Boss Chamber — ${boss.name}`),
+              });
+            }
           }
         }
       }
@@ -583,7 +621,11 @@ export class GameEngine {
           this.dungeon.spawnChest(this.activeRoom.worldX - 3, this.activeRoom.worldZ - 2, 'rare');
           this.dungeon.spawnShrine(this.activeRoom.worldX + 3, this.activeRoom.worldZ - 2);
           this.dungeon.spawnTrapdoor(this.activeRoom.worldX, this.activeRoom.worldZ + 2);
-          this.showBanner('Boss Vanquished! Descend Deeper');
+          if (this.floor === 3 && !this.director.hasPlayed('act3_sunrise')) {
+            void this.director.play('act3_sunrise', (d) => runAct3Sunrise(d));
+          } else {
+            this.showBanner('Boss Vanquished! Descend Deeper');
+          }
         } else {
           if (Math.random() < 0.55) {
             this.dungeon.spawnShrine(this.activeRoom.worldX, this.activeRoom.worldZ);

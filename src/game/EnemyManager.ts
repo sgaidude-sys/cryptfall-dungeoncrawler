@@ -88,16 +88,18 @@ export class EnemyManager {
   ) {}
 
   public spawnWaveForRoom(room: RoomData, floorNum: number): void {
-    const scale = 1 + (floorNum - 1) * 0.45;
+    const scale = 1 + (floorNum - 1) * 0.6;
     if (room.type === 'boss') {
       const bossKind: EnemyKind = floorNum >= 2 && floorNum % 2 === 0 ? 'dragon' : 'boss';
       this.spawnEnemy(bossKind, room.worldX, room.worldZ - 3.5, scale);
       this.spawnEnemy(floorNum >= 2 ? 'ghost' : 'rogue', room.worldX - 6, room.worldZ - 5, scale);
       this.spawnEnemy(floorNum >= 2 ? 'demon' : 'mage', room.worldX + 6, room.worldZ - 5, scale);
+      this.spawnEnemy('warrior', room.worldX - 4, room.worldZ + 4, scale);
+      this.spawnEnemy('warrior', room.worldX + 4, room.worldZ + 4, scale);
       return;
     }
 
-    const count = room.type === 'trap' ? 4 : 5 + Math.min(5, floorNum);
+    const count = room.type === 'trap' ? 5 : 6 + Math.min(6, floorNum);
     const pool: EnemyKind[] =
       floorNum >= 3
         ? ['warrior', 'pyre_skeleton', 'demon', 'orc', 'frost_wraith', 'ghost', 'mage', 'imp']
@@ -393,10 +395,10 @@ export class EnemyManager {
       anim,
       pos: mesh.position,
       vel: new THREE.Vector3(),
-      hp: Math.round(cfg.hp * scale * 2.1),
-      maxHp: Math.round(cfg.hp * scale * 2.1),
-      speed: cfg.speed * 1.12,
-      damage: Math.round(cfg.dmg * scale * 2.6),
+      hp: Math.round(cfg.hp * scale * 3.2),
+      maxHp: Math.round(cfg.hp * scale * 3.2),
+      speed: cfg.speed * 1.2,
+      damage: Math.round(cfg.dmg * scale * 3.8),
       range: cfg.range,
       radius: cfg.rad,
       state: 'chase',

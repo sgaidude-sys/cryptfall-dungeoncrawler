@@ -60,9 +60,9 @@ export class RagnarokStatsSystem {
   public jobLevel = 1;
   public weaponRefine = 0; // +0..+10
   public armorRefine = 0;  // +0..+10
-  public baseArmorDef = 6;
-  public baseWeaponAtk = 22;
-  public baseWeaponMatk = 20;
+  public baseArmorDef = 4;
+  public baseWeaponAtk = 14;
+  public baseWeaponMatk = 13;
 
   // Active RO buffs
   public endureTimer = 0;
@@ -148,7 +148,7 @@ export class RagnarokStatsSystem {
     const matkMax = Math.max(matkMin, total.int + Math.pow(Math.floor(total.int / 7), 2) + this.baseWeaponMatk + this.weaponRefine * 5);
 
     // Classic Hard DEF + Soft DEF
-    const hardDef = this.baseArmorDef + this.armorRefine * 3 + (this.classId === 'knight' ? 6 : 0);
+    const hardDef = this.baseArmorDef + this.armorRefine * 3 + (this.classId === 'knight' ? 4 : 0);
     const softDef = Math.floor(total.vit * 0.8 + Math.pow(Math.floor(total.vit / 20), 2));
     const mdef = total.int + Math.floor(total.vit / 2) + (this.endureTimer > 0 ? 15 : 0);
 
@@ -167,8 +167,8 @@ export class RagnarokStatsSystem {
     const castTimeMult = Math.max(0, 1 - total.dex / 150);
 
     // HP & SP
-    const classHpBase = this.classId === 'knight' || this.classId === 'barbarian' ? 160 : this.classId === 'ranger' ? 120 : 105;
-    const maxHp = Math.round((classHpBase + this.level * 18) * (1 + total.vit * 0.015));
+    const classHpBase = this.classId === 'knight' || this.classId === 'barbarian' ? 115 : this.classId === 'ranger' ? 85 : 75;
+    const maxHp = Math.round((classHpBase + this.level * 15) * (1 + total.vit * 0.015));
     const maxSp = Math.round((60 + this.level * 6) * (1 + total.int * 0.02));
     const potionMult = 1 + total.vit * 0.02;
     const hpRegenPerTick = Math.max(2, Math.floor(total.vit * 0.6 + maxHp / 140));

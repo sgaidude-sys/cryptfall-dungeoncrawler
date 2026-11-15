@@ -782,3 +782,145 @@ html, body, #app {
   color: #f87171;
   -webkit-text-stroke: 1.5px #450a0a;
 }
+
+/* CutsceneDirector Overlay */
+#cutscene-director-root {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  pointer-events: none;
+}
+#cutscene-director-root.active {
+  pointer-events: auto;
+}
+.cs-fade {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+}
+.cs-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  height: 12vh;
+  background: #040509;
+  transition: transform 0.45s cubic-bezier(0.2, 0.9, 0.2, 1);
+  z-index: 92;
+}
+.cs-bar-top { top: 0; transform: translateY(-100%); }
+.cs-bar-top.open { transform: translateY(0); }
+.cs-bar-bot { bottom: 0; transform: translateY(100%); }
+.cs-bar-bot.open { transform: translateY(0); }
+
+.cs-skip-btn {
+  position: fixed;
+  top: 2.5vh;
+  right: 24px;
+  z-index: 95;
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 1px solid rgba(250, 204, 21, 0.45);
+  background: rgba(12, 14, 24, 0.88);
+  color: #fde047;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+.cs-skip-btn.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.cs-chapter-card {
+  position: fixed;
+  inset: 0;
+  z-index: 94;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: rgba(4, 5, 10, 0.55);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.45s ease;
+}
+.cs-chapter-card.open { opacity: 1; }
+.cs-chapter-act {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.28em;
+  color: #fde047;
+  text-transform: uppercase;
+}
+.cs-chapter-title {
+  font-size: 36px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  color: #fff;
+  text-transform: uppercase;
+  text-shadow: 0 4px 24px rgba(0, 0, 0, 0.95);
+}
+.cs-chapter-sub {
+  font-size: 14px;
+  letter-spacing: 0.12em;
+  color: #cbd5e1;
+  text-transform: uppercase;
+}
+.cs-chapter-rule {
+  width: 240px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(250, 204, 21, 0.75), transparent);
+}
+
+.cs-dialogue-box {
+  position: fixed;
+  left: 50%;
+  bottom: 14vh;
+  transform: translateX(-50%) translateY(16px);
+  width: min(760px, 92vw);
+  z-index: 95;
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  padding: 16px 20px;
+  border-radius: 14px;
+  background: rgba(10, 12, 22, 0.94);
+  border: 1px solid rgba(250, 204, 21, 0.4);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.8);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  cursor: pointer;
+}
+.cs-dialogue-box.open {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(-50%) translateY(0);
+}
+.cs-portrait {
+  width: 62px;
+  height: 62px;
+  flex-shrink: 0;
+  border-radius: 12px;
+  border: 2px solid #fde047;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+  font-weight: 900;
+  color: #fff;
+}
+.cs-dialogue-body { flex: 1; }
+.cs-speaker-row { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+.cs-speaker-name { font-size: 16px; font-weight: 800; color: #fde047; }
+.cs-speaker-title { font-size: 12px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.08em; }
+.cs-dialogue-text { font-size: 15px; line-height: 1.5; color: #f1f5f9; min-height: 44px; }
+.cs-continue-hint { font-size: 11px; color: #7dd3fc; text-align: right; margin-top: 6px; letter-spacing: 0.08em; }
