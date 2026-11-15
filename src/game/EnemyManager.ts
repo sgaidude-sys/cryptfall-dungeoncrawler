@@ -76,6 +76,8 @@ export interface Enemy {
   /** Story identity for named bosses (malakor, lyra, vance, warden, mvp). */
   bossId?: string;
   windupTotal: number;
+  /** Footprint radius derived from the actual model bounds (used for wall collision). */
+  bodyRadius: number;
 }
 
 export interface BossIdentity {
@@ -180,6 +182,8 @@ export class EnemyManager {
   private projGeo = new THREE.SphereGeometry(0.22, 8, 8);
   /** Fired when a named boss dies (story hooks: Vance -> Warden betrayal, etc.). */
   public onBossDefeated?: (e: Enemy) => void;
+  /** Set by the engine so spawns can be validated against walls. */
+  public dungeon: DungeonFloorBuilder | null = null;
 
   constructor(
     private scene: THREE.Scene,
@@ -189,6 +193,35 @@ export class EnemyManager {
   ) {}
 
   public spawnWaveForRoom(room: RoomData, floorNum: number): void {
+    const before = this.enemies.length;
+    this.spawnWaveInner(room, floorNum);
+    for (let i = before; i < this.enemies.length; i++) this.settleInto(this.enemies[i], room.worldX, room.worldZ);
+  }
+
+  /** Pull an enemy toward (cx, cz) until its whole body is clear of walls and props. */
+  public settleInto(e: Enemy, cx: number, cz: number): void {
+    const d = this.dungeon;
+    if (!d) return;
+    if (d.isWalkable(e.pos.x, e.pos.z, e.bodyRadius)) return;
+    const sx = e.pos.x;
+    const sz = e.pos.z;
+    for (let i = 1; i <= 20; i++) {
+      const t = i / 20;
+      const x = sx + (cx - sx) * t;
+      const z = sz + (cz - sz) * t;
+      if (d.isWalkable(x, z, e.bodyRadius)) {
+        e.pos.x = x;
+        e.pos.z = z;
+        return;
+      }
+    }
+    // Last resort: shrink the footprint so it can still move instead of freezing in a wall
+    e.pos.x = cx;
+    e.pos.z = cz;
+    e.bodyRadius = Math.min(e.bodyRadius, e.radius);
+  }
+
+  private spawnWaveInner(room: RoomData, floorNum: number): void {
     const scale = 1 + (floorNum - 1) * 0.6;
     if (room.type === 'boss') {
       const identity = bossIdentityForFloor(floorNum);
@@ -455,8 +488,10 @@ export class EnemyManager {
       mesh.traverse((obj) => {
         if (obj instanceof THREE.Mesh && obj.material instanceof THREE.MeshStandardMaterial) {
           const cloned = obj.material.clone();
+          // Subtle colour identity only — no glowing halo
+          cloned.color.lerp(new THREE.Color(cfg.tint), 0.25);
           cloned.emissive = new THREE.Color(cfg.tint);
-          cloned.emissiveIntensity = 0.45;
+          cloned.emissiveIntensity = 0.06;
           obj.material = cloned;
         }
       });
@@ -466,23 +501,24 @@ export class EnemyManager {
     const tintHex = 'tint' in cfg && cfg.tint ? (cfg.tint as number) : undefined;
     const rimHex =
       identity?.rim ?? tintHex ?? (kind === 'demon' || kind === 'imp' || kind === 'dragon' ? 0xff7a3a : 0x7dd3fc);
-    MaterialFX.apply(mesh, rimHex, kind === 'boss' || kind === 'dragon' ? 0.9 : 0.55, 2.4);
-
-    if (kind === 'boss' || kind === 'dragon') {
-      const aura = new THREE.PointLight(identity?.rim ?? (kind === 'dragon' ? 0xff7722 : 0xff3344), 18, 12);
-      aura.position.set(0, 2.2, 0);
-      mesh.add(aura);
-    } else if (kind === 'imp' || kind === 'demon') {
-      const aura = new THREE.PointLight(0xff5522, 6, 5);
-      aura.position.set(0, 0.9, 0);
-      mesh.add(aura);
-    } else if (kind === 'ghost') {
-      const aura = new THREE.PointLight(0x66e0ff, 5, 5);
-      aura.position.set(0, 0.9, 0);
-      mesh.add(aura);
-    }
+    MaterialFX.apply(mesh, rimHex, 0, 2.4);
 
     this.scene.add(mesh);
+
+    // Collision footprint from the real model bounds (bind pose), so big/scaled models stop at walls
+    // (SkinnedMesh boxes are empty before the first skeleton update, so measure raw geometry instead)
+    const bb = new THREE.Box3();
+    const tmp = new THREE.Box3();
+    mesh.updateMatrixWorld(true);
+    mesh.traverse((o) => {
+      if (o instanceof THREE.Mesh && o.geometry) {
+        if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+        tmp.copy(o.geometry.boundingBox!).applyMatrix4(o.matrixWorld);
+        bb.union(tmp);
+      }
+    });
+    const footprint = Math.min(bb.max.x - bb.min.x, bb.max.z - bb.min.z);
+    const bodyRadius = THREE.MathUtils.clamp(Number.isFinite(footprint) ? footprint * 0.4 : cfg.rad, cfg.rad, 2.4);
 
     const anims: EnemyAnimSet =
       'anims' in cfg && cfg.anims
@@ -543,6 +579,7 @@ export class EnemyManager {
       isBoss,
       bossId: identity?.bossId,
       windupTotal: 0.55,
+      bodyRadius,
     };
     this.enemies.push(enemy);
     return enemy;
@@ -684,8 +721,8 @@ export class EnemyManager {
       if (e.vel.lengthSq() > 0.01) {
         const nx = e.pos.x + e.vel.x * dt;
         const nz = e.pos.z + e.vel.z * dt;
-        if (dungeon.isWalkable(nx, e.pos.z, e.radius)) e.pos.x = nx;
-        if (dungeon.isWalkable(e.pos.x, nz, e.radius)) e.pos.z = nz;
+        if (dungeon.isWalkable(nx, e.pos.z, e.bodyRadius)) e.pos.x = nx;
+        if (dungeon.isWalkable(e.pos.x, nz, e.bodyRadius)) e.pos.z = nz;
         e.vel.multiplyScalar(Math.pow(0.015, dt));
       }
 
@@ -777,9 +814,33 @@ export class EnemyManager {
           const moveSpd = e.speed * spdMult;
           const nx = e.pos.x + dir.x * moveSpd * dt;
           const nz = e.pos.z + dir.z * moveSpd * dt;
-          if (dungeon.isWalkable(nx, e.pos.z, e.radius)) e.pos.x = nx;
-          if (dungeon.isWalkable(e.pos.x, nz, e.radius)) e.pos.z = nz;
+          if (dungeon.isWalkable(nx, e.pos.z, e.bodyRadius)) e.pos.x = nx;
+          if (dungeon.isWalkable(e.pos.x, nz, e.bodyRadius)) e.pos.z = nz;
           e.anim?.playLoop(e.anims.move, 0.12, spdMult * 1.15);
+        }
+      }
+    }
+
+    // Soft separation so mobs don't stack inside each other (never pushes anyone into a wall)
+    for (let i = 0; i < this.enemies.length; i++) {
+      const a = this.enemies[i];
+      if (a.dead) continue;
+      for (let j = i + 1; j < this.enemies.length; j++) {
+        const b = this.enemies[j];
+        if (b.dead) continue;
+        const dx = b.pos.x - a.pos.x;
+        const dz = b.pos.z - a.pos.z;
+        const minD = (a.radius + b.radius) * 0.9;
+        const d2 = dx * dx + dz * dz;
+        if (d2 > 0.0001 && d2 < minD * minD) {
+          const d = Math.sqrt(d2);
+          const push = ((minD - d) / d) * 0.5 * Math.min(1, dt * 10);
+          const ax = a.pos.x - dx * push;
+          const az = a.pos.z - dz * push;
+          const bx = b.pos.x + dx * push;
+          const bz = b.pos.z + dz * push;
+          if (dungeon.isWalkable(ax, az, a.bodyRadius)) a.pos.set(ax, a.pos.y, az);
+          if (dungeon.isWalkable(bx, bz, b.bodyRadius)) b.pos.set(bx, b.pos.y, bz);
         }
       }
     }

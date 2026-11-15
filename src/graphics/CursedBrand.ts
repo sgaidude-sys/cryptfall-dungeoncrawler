@@ -22,7 +22,7 @@ export class CursedBrand {
     ring2.rotation.x = Math.PI / 2;
     ring2.position.y = 0.035;
     this.group.add(ring, ring2);
-    this.light = new THREE.PointLight(0xa855f7, 0, 2.6, 2);
+    this.light = new THREE.PointLight(0xa855f7, 0, 1.2, 2);
     this.group.add(this.light);
     this.group.visible = false;
   }
@@ -60,21 +60,22 @@ export class CursedBrand {
     if (this.level <= 0) {
       // Curse lifted: flare gold, then fade away
       this.fadeGold = Math.max(0, this.fadeGold - dt * 0.6);
-      this.ringMat.color.setHex(0xffd166).multiplyScalar(2.5 * this.fadeGold);
-      this.runeMat.color.setHex(0xfff1b8).multiplyScalar(2 * this.fadeGold);
+      this.ringMat.color.setHex(0xffd166).multiplyScalar(this.fadeGold);
+      this.runeMat.color.setHex(0xfff1b8).multiplyScalar(0.8 * this.fadeGold);
       this.light.color.setHex(0xffd166);
-      this.light.intensity = 3 * this.fadeGold;
+      this.light.intensity = 0.4 * this.fadeGold;
       if (this.fadeGold <= 0) this.group.visible = false;
       return;
     }
     // Heartbeat pulse that quickens as the curse spreads
     const rate = 1.1 + this.level * 0.45;
     const beat = Math.pow(Math.max(0, Math.sin(this.t * rate * Math.PI)), 6);
-    const k = 1.4 + this.level * 0.5 + beat * (1.5 + this.level * 0.4);
+    // Kept below the bloom threshold so the brand reads as a mark, not a glowing halo
+    const k = 0.75 + this.level * 0.08 + beat * 0.3;
     this.ringMat.color.setHex(0xa855f7).multiplyScalar(k);
     this.runeMat.color.setHex(0xd8b4fe).multiplyScalar(k * 0.7);
     this.group.rotation.y += dt * (0.6 + this.level * 0.3);
-    this.light.intensity = 0.6 + this.level * 0.5 + beat * 1.8;
+    this.light.intensity = 0.1 + beat * 0.3;
     this.group.scale.setScalar(1 + this.level * 0.12 + beat * 0.08);
   }
 }

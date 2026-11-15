@@ -155,7 +155,8 @@ export class RagnarokStatsSystem {
     // HIT / FLEE / CRIT / ASPD / Cast Time
     const hit = 175 + this.level + total.dex;
     const flee = 100 + this.level + total.agi;
-    const perfectDodge = Math.min(45, 1 + total.luk * 0.12);
+    // Fraction (0..0.45): ~1.6% at 5 LUK, ~13% at 99 LUK (was stored as a percent and dodged every hit)
+    const perfectDodge = Math.min(0.45, (1 + total.luk * 0.12) / 100);
     const critChance = Math.min(0.85, (1 + total.luk * 0.35 + (this.classId === 'rogue' ? 10 : 0)) / 100);
 
     const quickenBonus = this.quickenTimer > 0 ? 16 : 0;

@@ -192,14 +192,15 @@ export class CutsceneDirector {
       mesh.traverse((obj) => {
         if (obj instanceof THREE.Mesh && obj.material instanceof THREE.MeshStandardMaterial) {
           const mat = obj.material.clone();
+          // Colour identity only — no glow halo
+          mat.color.lerp(new THREE.Color(opts.tintHex!), 0.2);
           mat.emissive = new THREE.Color(opts.tintHex!);
-          // Rim-lit actors only need a hint of tint, otherwise the albedo washes out
-          mat.emissiveIntensity = opts.rimHex !== undefined ? 0.16 : 0.45;
+          mat.emissiveIntensity = 0.05;
           obj.material = mat;
         }
       });
     }
-    if (opts?.rimHex !== undefined) MaterialFX.apply(mesh, opts.rimHex, 0.55, 2.6);
+    if (opts?.rimHex !== undefined) MaterialFX.apply(mesh, opts.rimHex, 0, 2.6);
     this.scene.add(mesh);
 
     let anim: AnimatorHelper | undefined;
@@ -403,6 +404,16 @@ export class CutsceneDirector {
         this.setFov(b.fov, b.dur);
         return;
       case 'spawn': {
+        // If the real entity is already registered (e.g. the boss standing in its arena), direct it
+        // instead of spawning a duplicate model on top of it.
+        const existing = this.actors.get(b.id);
+        if (existing && !existing.isTemp) {
+          // Hit the scripted mark so the camera framing matches (position is restored afterwards)
+          existing.mesh.position.set(this.v(b.at).x, existing.mesh.position.y, this.v(b.at).z);
+          if (b.face) this.rotateActorToward(b.id, this.v(b.face));
+          this.playCue(b.id, b.anim ?? 'Idle');
+          return;
+        }
         this.spawnActor(b.id, b.model, this.v(b.at), {
           scale: b.scale,
           tintHex: b.tint,

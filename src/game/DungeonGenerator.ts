@@ -5,7 +5,11 @@ import { RoomData, TownNpcId } from '../types';
 import type { TownView, TownNpcView } from '../systems/TownHubSystem';
 
 export const TILE = 4.0;
-export const ROOM_STEP = 28.0; // 5x5 room (20m) + 2-tile (8m) corridor = 28m center-to-center
+export const ROOM_STEP = 28.0;
+/** Wall meshes are 1.5m thick and centred on the room edge: inner face sits 0.75m in. */
+const WALL_MARGIN = 0.85;
+/** Corridor side walls sit at ±2m (inner face ±1.25m). */
+const CORRIDOR_HALF = 1.2; // 5x5 room (20m) + 2-tile (8m) corridor = 28m center-to-center
 
 export interface WalkRect {
   minX: number;
@@ -256,10 +260,10 @@ export class DungeonFloorBuilder {
     this.rooms = [townRoom];
     const hw = (7 * TILE) / 2;
     this.walkRects.push({
-      minX: -hw + 0.8,
-      maxX: hw - 0.8,
-      minZ: -hw + 0.8,
-      maxZ: hw - 0.8,
+      minX: -hw + WALL_MARGIN,
+      maxX: hw - WALL_MARGIN,
+      minZ: -hw + WALL_MARGIN,
+      maxZ: hw - WALL_MARGIN,
     });
 
     for (let ix = -3; ix <= 3; ix++) {
@@ -397,12 +401,6 @@ export class DungeonFloorBuilder {
         propMesh.position.set(L.x + (L.x < 0 ? 1.5 : L.x > 0 ? -1.5 : 1.6), 0, L.z + 0.6);
         this.group.add(propMesh);
       }
-
-      // Each shopfront gets its own warm lamp so the square reads at a glance
-      const lamp = new THREE.PointLight(new THREE.Color(n.color).lerp(new THREE.Color(0xffc48a), 0.6), 4, 7, 1.8);
-      lamp.position.set(L.x, 2.6, L.z + (L.z < 0 ? 1.2 : -1.2));
-      this.group.add(lamp);
-      this.torches.push({ light: lamp, baseIntensity: 4, baseDistance: 7, seed: Math.random() * 100 });
 
       this.obstacles.push({ x: L.x, z: L.z, r: 0.75 });
       this.interactables.push({
@@ -558,12 +556,12 @@ export class DungeonFloorBuilder {
     const halfW = Math.floor(room.widthTiles / 2);
     const halfD = Math.floor(room.depthTiles / 2);
 
-    // Walkable AABB (with 0.65m wall margin)
+    // Walkable AABB — inset to the inner face of the 1.5m-thick walls
     this.walkRects.push({
-      minX: room.worldX - hw + 0.65,
-      maxX: room.worldX + hw - 0.65,
-      minZ: room.worldZ - hd + 0.65,
-      maxZ: room.worldZ + hd - 0.65,
+      minX: room.worldX - hw + WALL_MARGIN,
+      maxX: room.worldX + hw - WALL_MARGIN,
+      minZ: room.worldZ - hd + WALL_MARGIN,
+      maxZ: room.worldZ + hd - WALL_MARGIN,
     });
 
     // Floor tiles
@@ -756,8 +754,8 @@ export class DungeonFloorBuilder {
 
     this.walkRects.push(
       axis === 'x'
-        ? { minX: startEdge - 2.5, maxX: endEdge + 2.5, minZ: fixedCoord - 1.5, maxZ: fixedCoord + 1.5 }
-        : { minX: fixedCoord - 1.5, maxX: fixedCoord + 1.5, minZ: startEdge - 2.5, maxZ: endEdge + 2.5 }
+        ? { minX: startEdge - 2.5, maxX: endEdge + 2.5, minZ: fixedCoord - CORRIDOR_HALF, maxZ: fixedCoord + CORRIDOR_HALF }
+        : { minX: fixedCoord - CORRIDOR_HALF, maxX: fixedCoord + CORRIDOR_HALF, minZ: startEdge - 2.5, maxZ: endEdge + 2.5 }
     );
 
     for (let i = 0; i < steps; i++) {
@@ -853,10 +851,10 @@ export class DungeonFloorBuilder {
     if (this.gatesLocked && this.lockedRoom) {
       const hw = (this.lockedRoom.widthTiles * TILE) / 2;
       const hd = (this.lockedRoom.depthTiles * TILE) / 2;
-      const minX = this.lockedRoom.worldX - hw + 0.65 + radius;
-      const maxX = this.lockedRoom.worldX + hw - 0.65 - radius;
-      const minZ = this.lockedRoom.worldZ - hd + 0.65 + radius;
-      const maxZ = this.lockedRoom.worldZ + hd - 0.65 - radius;
+      const minX = this.lockedRoom.worldX - hw + WALL_MARGIN + radius;
+      const maxX = this.lockedRoom.worldX + hw - WALL_MARGIN - radius;
+      const minZ = this.lockedRoom.worldZ - hd + WALL_MARGIN + radius;
+      const maxZ = this.lockedRoom.worldZ + hd - WALL_MARGIN - radius;
       if (x < minX || x > maxX || z < minZ || z > maxZ) return false;
     }
 

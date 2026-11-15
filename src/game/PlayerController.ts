@@ -132,7 +132,7 @@ export class PlayerController {
     this.anim.playLoop('Idle_A', 0.1);
 
     // Hero shading: cool fresnel rim so the silhouette pops against every biome
-    MaterialFX.apply(this.mesh, 0xa5b4fc, 0.42, 2.8);
+    MaterialFX.apply(this.mesh, 0xa5b4fc, 0, 2.8);
     this.updateWeaponRefineVisuals();
   }
 
@@ -606,8 +606,9 @@ export class PlayerController {
   }
 
   private tryMove(dx: number, dz: number, dungeon: DungeonFloorBuilder): void {
-    if (dungeon.isWalkable(this.pos.x + dx, this.pos.z, 0.48)) this.pos.x += dx;
-    if (dungeon.isWalkable(this.pos.x, this.pos.z + dz, 0.48)) this.pos.z += dz;
+    // 0.6m footprint matches the hero model's shoulders/shield so it can't clip into walls
+    if (dungeon.isWalkable(this.pos.x + dx, this.pos.z, 0.6)) this.pos.x += dx;
+    if (dungeon.isWalkable(this.pos.x, this.pos.z + dz, 0.6)) this.pos.z += dz;
   }
 
   private usePrimaryAttack(_enemies: EnemyManager): void {

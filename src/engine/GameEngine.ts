@@ -120,6 +120,7 @@ export class GameEngine {
     this.scene.add(this.dungeon.group);
     this.enemies = new EnemyManager(this.scene, this.assets, this.vfx, this.sound);
     this.enemies.onBossDefeated = (e) => this.onBossDefeated(e);
+    this.enemies.dungeon = this.dungeon;
     this.director = new CutsceneDirector(this.scene, this.camera, this.assets, this.vfx, this.sound);
     this.director.hooks = {
       flash: (color, amt) => this.post.flash(color, amt * 0.35),
@@ -278,7 +279,6 @@ export class GameEngine {
     if (cls.leftWeapon) this.assets.attachToHand(model, cls.leftWeapon, 'left');
     model.position.set(1.8, 0, 0);
     model.scale.setScalar(1.3);
-    MaterialFX.apply(model, parseInt(cls.accentHex.slice(1), 16), 0.7, 2.4);
     this.scene.add(model);
     this.previewModel = model;
     this.previewAnim = new AnimatorHelper(model, this.assets);
@@ -559,6 +559,7 @@ export class GameEngine {
       queue(0.9, () => {
         const scale = 1 + (this.floor - 1) * 0.6;
         const warden = this.enemies.spawnEnemy(ABYSSAL_WARDEN.kind, bossPos.x, bossPos.z, scale, ABYSSAL_WARDEN);
+        this.enemies.settleInto(warden, origin.x, origin.z);
         warden.mesh.visible = false;
         this.holdRoomClear = false;
         void this.director.playScript(STORY_SCRIPTS.act3_warden_betrayal, origin, () => {
@@ -1135,7 +1136,10 @@ export class GameEngine {
       if (boss.bossId === 'malakor') this.story.set('act1_malakor_met');
       if (boss.bossId === 'lyra') this.story.set('act2_lyra_met');
       if (boss.bossId === 'vance') this.story.set('act3_vance_met');
-      void this.director.playScript(STORY_SCRIPTS[storyScene], origin);
+      // Direct the real boss in its intro (no duplicate cutscene model)
+      const bossId = boss.bossId!;
+      this.director.registerActor(bossId, boss.mesh, boss.anim ?? undefined);
+      void this.director.playScript(STORY_SCRIPTS[storyScene], origin, () => this.director.unregisterActor(bossId));
       return;
     }
     this.cutscenes.play({
